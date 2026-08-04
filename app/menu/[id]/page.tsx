@@ -257,8 +257,8 @@ export default function DetailMenuPage() {
             <div className="pt-4">
               <button
                 onClick={handleAddToCart}
-                className="w-full bg-orange-400 hover:bg-orange-500 text-white font-bold py-4.5 px-6 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-[0.99] cursor-pointer shadow-sm"
-              >
+                className="w-full bg-orange-400 hover:bg-orange-500 text-white font-bold py-4.5 px-6 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-[0.99] cursor-pointer shadow-sm">
+
                 <ShoppingCart size={22} className="text-white fill-white" />
                 <span className="text-lg font-bold text-white">
                   Tambah Ke Keranjang

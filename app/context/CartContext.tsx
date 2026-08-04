@@ -49,6 +49,7 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
     localStorage.setItem('smart_canteen_cart', JSON.stringify(cartItems));
   }, [cartItems]);
 
+  // 3. Tambah ke keranjang dengan pencocokan ID yang ketat & unik
   const addToCart = (newItem: CartItem) => {
     setCartItems((prevItems) => {
       const existingIndex = prevItems.findIndex((i) => i.id === newItem.id);

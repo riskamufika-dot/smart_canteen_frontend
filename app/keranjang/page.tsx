@@ -201,7 +201,7 @@ export default function KeranjangPage() {
                         alt={item.name}
                         className="h-20 w-24 sm:h-24 sm:w-32 rounded-2xl object-cover bg-gray-100 shrink-0"
                       />
-
+                      
                       <div className="min-w-0 space-y-1">
                         <h3 className="font-bold text-gray-900 text-base sm:text-lg truncate">
                           {item.name}
@@ -220,6 +220,7 @@ export default function KeranjangPage() {
                       </div>
                     </div>
 
+                    {/* SUBTOTAL HARGA & COUNTER */}
                     <div className="flex flex-col items-end gap-3 shrink-0">
                       <span className="text-base sm:text-lg font-bold text-[#F28728]">
                         Rp {itemSubtotal.toLocaleString('id-ID')}

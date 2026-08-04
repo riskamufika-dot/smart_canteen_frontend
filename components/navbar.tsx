@@ -14,12 +14,10 @@ export default function Navbar() {
     '/signup',
     '/aboutus',
     '/riwayat',
+
     '/keranjang',
     '/status-pesanan',
-    '/dasboard-admin',
-    '/daftar-pesanan',
-    '/kelola-menu',
-    '/laporan',
+    
   ];
 
   // 2. Cek apakah pathname saat ini persis sama dengan salah satu hiddenExactPaths
