@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Home } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { STRAPI_URL } from '@/lib/getImageUrl';
 
 interface OrderItem {
   id?: number | string;
@@ -62,7 +63,7 @@ export default function StatusPesananPage() {
     // 2. Jika Strapi online, cek update status real-time dari backend
     try {
       const res = await fetch(
-        'http://localhost:1337/api/orders?sort[0]=createdAt:desc&pagination[limit]=1'
+        `${STRAPI_URL}/api/orders?sort[0]=createdAt:desc&pagination[limit]=1`
       );
 
       if (res.ok) {

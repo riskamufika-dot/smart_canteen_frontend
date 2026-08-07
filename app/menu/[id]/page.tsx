@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Home, ShoppingCart, Check } from 'lucide-react';
 import Link from 'next/link';
 import { useCart } from '@/app/context/CartContext';
+import { getImageUrl, STRAPI_URL } from '@/lib/getImageUrl';
 
 interface MenuDetail {
   id: number;
@@ -36,7 +37,7 @@ export default function DetailMenuPage() {
 
       try {
         let res = await fetch(
-          `http://localhost:1337/api/menus/${params.id}?populate=*`
+          `${STRAPI_URL}/api/menus/${params.id}?populate=*`
         );
 
         if (res.ok) {
@@ -49,7 +50,7 @@ export default function DetailMenuPage() {
         }
 
         res = await fetch(
-          `http://localhost:1337/api/menus?filters[documentId][$eq]=${params.id}&populate=*`
+          `${STRAPI_URL}/api/menus?filters[documentId][$eq]=${params.id}&populate=*`
         );
         let filterResult = await res.json();
 
@@ -60,7 +61,7 @@ export default function DetailMenuPage() {
         }
 
         res = await fetch(
-          `http://localhost:1337/api/menus?filters[id][$eq]=${params.id}&populate=*`
+          `${STRAPI_URL}/api/menus?filters[id][$eq]=${params.id}&populate=*`
         );
         filterResult = await res.json();
 
@@ -81,17 +82,6 @@ export default function DetailMenuPage() {
 
     getMenuDetail();
   }, [params?.id]);
-
-  const getImageUrl = (imageObj: any) => {
-    if (!imageObj) return '/placeholder.jpeg';
-    const dataObj = imageObj.attributes || imageObj;
-    const imgPath =
-      dataObj.url ||
-      dataObj.formats?.medium?.url ||
-      dataObj.formats?.small?.url;
-    if (!imgPath) return '/placeholder.jpeg';
-    return imgPath.startsWith('http') ? imgPath : `http://localhost:1337${imgPath}`;
-  };
 
   const handleIncrease = () => setQuantity((prev) => prev + 1);
   const handleDecrease = () => setQuantity((prev) => (prev > 1 ? prev - 1 : 1));

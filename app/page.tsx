@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 "use client";
 
 import React from "react";
@@ -72,3 +73,11 @@ export default function LoginPage() {
     </div>
   );
 }
+=======
+import { redirect } from 'next/navigation';
+
+export default function RootPage() {
+  // Langsung arahkan user ke URL /login
+  redirect('/login');
+}
+>>>>>>> 3e3164811ad8254bb9a8e8453afa91f15d2ab6d2

@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Search, Star, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { getImageUrl, STRAPI_URL } from '@/lib/getImageUrl';
 
 interface MenuItem {
   id: number;
@@ -43,8 +44,8 @@ export default function HomePage() {
       setLoading(true);
       try {
         const [resMenus, resHomes] = await Promise.all([
-          fetch('http://localhost:1337/api/menus?populate=*&pagination[limit]=1000'),
-          fetch('http://localhost:1337/api/homes?populate=*&pagination[limit]=1000'),
+          fetch(`${STRAPI_URL}/api/menus?populate=*&pagination[limit]=1000`),
+          fetch(`${STRAPI_URL}/api/homes?populate=*&pagination[limit]=1000`),
         ]);
 
         const dataMenus = await resMenus.json();
@@ -98,36 +99,6 @@ export default function HomePage() {
       return tenant.name.toLowerCase().includes(query);
     });
   }, [tenants, searchTerm]);
-
-  // Helper URL Gambar
-  const getImageUrl = (item: any): string => {
-    if (!item) return '/placeholder.jpeg';
-
-    const dataObj = item.attributes || item;
-
-    const media =
-      dataObj.banner ||
-      dataObj.benner ||
-      dataObj.image ||
-      dataObj.foto ||
-      dataObj.gambar ||
-      dataObj.cover;
-
-    if (!media) return '/placeholder.jpeg';
-
-    const target = Array.isArray(media) ? media[0] : media;
-    const nestedTarget = target?.data?.attributes || target?.data || target;
-
-    const rawUrl =
-      nestedTarget?.url ||
-      nestedTarget?.formats?.medium?.url ||
-      nestedTarget?.formats?.small?.url ||
-      nestedTarget?.formats?.thumbnail?.url;
-
-    if (!rawUrl) return '/placeholder.jpeg';
-
-    return rawUrl.startsWith('http') ? rawUrl : `http://localhost:1337${rawUrl}`;
-  };
 
   // Handler Scroll Horizontal
   const handleScroll = (ref: React.RefObject<HTMLDivElement | null>, direction: 'left' | 'right') => {

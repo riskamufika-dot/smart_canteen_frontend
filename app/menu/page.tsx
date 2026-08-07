@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Star, Plus, LogOut, Search } from 'lucide-react';
 import Link from 'next/link';
+import { getImageUrl, STRAPI_URL } from '@/lib/getImageUrl';
 
 interface MenusRepsonse {
   res: {
@@ -35,7 +36,7 @@ interface MenusRepsonse {
   };
 }
 
-export default function MenuPage() {
+function MenuContent() {
   const [data, setData] = useState<MenusRepsonse['res'] | undefined>(undefined);
   const [loading, setLoading] = useState<boolean>(true);
   const router = useRouter();
@@ -54,7 +55,7 @@ export default function MenuPage() {
       setLoading(true);
       try {
         const response = await fetch(
-          'http://localhost:1337/api/menus?populate=*&pagination[limit]=10000'
+          `${STRAPI_URL}/api/menus?populate=*&pagination[limit]=10000`
         );
         const res: MenusRepsonse['res'] = await response.json();
         setData(res);
@@ -86,25 +87,6 @@ export default function MenuPage() {
     if (!menu) return 0;
     const attr = menu.attributes || menu;
     return Number(attr.price || attr.harga || 0);
-  };
-
-  // Helper URL Gambar Aman
-  const getImageUrl = (menu: any) => {
-    if (!menu) return '/placeholder.jpeg';
-    const attr = menu.attributes || menu;
-    const imageObj = attr.image || attr.foto || attr.gambar || menu.image;
-
-    if (!imageObj) return '/placeholder.jpeg';
-
-    const imgPath =
-      imageObj.url ||
-      imageObj.data?.attributes?.url ||
-      imageObj.attributes?.url ||
-      imageObj.formats?.medium?.url ||
-      imageObj.formats?.small?.url;
-
-    if (!imgPath) return '/placeholder.jpeg';
-    return imgPath.startsWith('http') ? imgPath : `http://localhost:1337${imgPath}`;
   };
 
   // 2. Filter Search pada Seluruh Data Database
@@ -314,5 +296,17 @@ export default function MenuPage() {
 
       </main>
     </div>
+  );
+}
+
+export default function MenuPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#FDFDFD] flex items-center justify-center text-gray-400">
+        Memuat menu...
+      </div>
+    }>
+      <MenuContent />
+    </Suspense>
   );
 }

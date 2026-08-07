@@ -12,6 +12,7 @@ import {
   X
 } from 'lucide-react';
 import Link from 'next/link';
+import { STRAPI_URL } from '@/lib/getImageUrl';
 
 export default function Dashboard() {
   // 1. State untuk menampung total pengguna dari Strapi
@@ -20,8 +21,6 @@ export default function Dashboard() {
 
   // 2. State untuk menu toggle responsif (Layar HP)
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
-
-  const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
 
   // 3. Fetch data pengguna dari API Strapi
   useEffect(() => {

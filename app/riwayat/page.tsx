@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Bell, Star, RefreshCw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { STRAPI_URL } from '@/lib/getImageUrl';
 
 interface OrderItem {
   id?: number | string;
@@ -41,7 +42,7 @@ export default function RiwayatPage() {
     let orders: OrderData[] = [];
 
     try {
-      const res = await fetch('http://localhost:1337/api/orders?sort[0]=createdAt:desc&populate=*');
+      const res = await fetch(`${STRAPI_URL}/api/orders?sort[0]=createdAt:desc&populate=*`);
 
       if (res.ok) {
         const result = await res.json();
@@ -133,7 +134,7 @@ export default function RiwayatPage() {
 
         if (numericHomeId) {
           // Menembak ke /api/homes/:id (Atau /api/home jika Single Type)
-          const res = await fetch(`http://localhost:1337/api/homes/${numericHomeId}`, {
+          const res = await fetch(`${STRAPI_URL}/api/homes/${numericHomeId}`, {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',

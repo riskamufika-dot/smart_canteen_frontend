@@ -4,6 +4,7 @@ import SubHeader from '@/components/sub-header';
 import React, { useEffect, useState } from "react";
 import Image from "next/image";
 import { Leaf, Smartphone, Wallet } from "lucide-react";
+import { STRAPI_URL } from '@/lib/getImageUrl';
 
 export default function AboutUs() {
   const [data, setData] = useState<any>(null);
@@ -11,7 +12,7 @@ export default function AboutUs() {
   useEffect(() => {
     async function getAboutData() {
       try {
-        const res = await fetch('http://localhost:1337/api/about');
+        const res = await fetch(`${STRAPI_URL}/api/about`);
         const json = await res.json();
         console.log({ json });
         setData(json);

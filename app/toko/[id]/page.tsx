@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Star, Plus, ArrowLeft } from 'lucide-react';
 import { useRouter, useParams } from 'next/navigation';
+import { getImageUrl, STRAPI_URL } from '@/lib/getImageUrl';
 
 export default function TokoDetailPage() {
   const router = useRouter();
@@ -20,7 +21,7 @@ export default function TokoDetailPage() {
       try {
         // 1. Fetch Detail Toko Ini
         const resHome = await fetch(
-          `http://localhost:1337/api/homes?filters[documentId][$eq]=${tenantId}&populate=*`
+          `${STRAPI_URL}/api/homes?filters[documentId][$eq]=${tenantId}&populate=*`
         );
         const dataHome = await resHome.json();
         const currentTenant = dataHome?.data?.[0];
@@ -28,13 +29,13 @@ export default function TokoDetailPage() {
 
         // 2. FETCH HANYA MENU YANG MILIK TOKO INI SAJA
         let resMenus = await fetch(
-          `http://localhost:1337/api/menus?filters[home][documentId][$eq]=${tenantId}&populate=*`
+          `${STRAPI_URL}/api/menus?filters[home][documentId][$eq]=${tenantId}&populate=*`
         );
         let dataMenus = await resMenus.json();
 
         if (!dataMenus?.data || dataMenus.data.length === 0) {
           resMenus = await fetch(
-            `http://localhost:1337/api/menus?filters[tenant][documentId][$eq]=${tenantId}&populate=*`
+            `${STRAPI_URL}/api/menus?filters[tenant][documentId][$eq]=${tenantId}&populate=*`
           );
           dataMenus = await resMenus.json();
         }
@@ -50,36 +51,6 @@ export default function TokoDetailPage() {
 
     fetchTenantData();
   }, [tenantId]);
-
-  // Helper URL Gambar
-  const getImageUrl = (item: any): string => {
-    if (!item) return '/placeholder.jpeg';
-
-    const dataObj = item.attributes || item;
-
-    const media =
-      dataObj.banner ||
-      dataObj.benner ||
-      dataObj.image ||
-      dataObj.foto ||
-      dataObj.gambar ||
-      dataObj.cover;
-
-    if (!media) return '/placeholder.jpeg';
-
-    const target = Array.isArray(media) ? media[0] : media;
-    const nestedTarget = target?.data?.attributes || target?.data || target;
-
-    const rawUrl =
-      nestedTarget?.url ||
-      nestedTarget?.formats?.medium?.url ||
-      nestedTarget?.formats?.small?.url ||
-      nestedTarget?.formats?.thumbnail?.url;
-
-    if (!rawUrl) return '/placeholder.jpeg';
-
-    return rawUrl.startsWith('http') ? rawUrl : `http://localhost:1337${rawUrl}`;
-  };
 
   if (loading) {
     return (

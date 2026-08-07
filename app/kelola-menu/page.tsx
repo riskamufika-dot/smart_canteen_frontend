@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { STRAPI_URL, getImageUrl } from '@/lib/getImageUrl';
 import { 
   LayoutDashboard, 
   ClipboardList, 
@@ -27,7 +28,7 @@ interface MenuItem {
   status: string;
 }
 
-export default function KelolaMenu() {
+export default function KelolaMenuPage() {
   const [menus, setMenus] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -48,8 +49,6 @@ export default function KelolaMenu() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const STRAPI_URL = 'http://localhost:1337';
-
   // 1. FETCH DATA DARI STRAPI
   const fetchMenus = async () => {
     try {
@@ -59,9 +58,7 @@ export default function KelolaMenu() {
 
       if (result.data) {
         const mappedData: MenuItem[] = result.data.map((item: any) => {
-          const imgUrl = item.foto?.url
-            ? `${STRAPI_URL}${item.foto.url}`
-            : 'https://images.unsplash.com/photo-1569718212165-3a8278d5f624?w=150&q=80';
+          const imgUrl = getImageUrl(item);
 
           return {
             id: item.id,

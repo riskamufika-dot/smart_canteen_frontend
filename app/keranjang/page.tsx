@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { ArrowLeft, Home, Trash2, Clock, Calendar, ChevronDown, DollarSign, Plus, Minus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCart } from '@/app/context/CartContext';
+import { STRAPI_URL } from '@/lib/getImageUrl';
 
 export default function KeranjangPage() {
   const router = useRouter();
@@ -96,7 +97,7 @@ export default function KeranjangPage() {
     try {
       console.log('📤 Mengirim ke Strapi:', strapiPayload);
 
-      const res = await fetch('http://localhost:1337/api/orders', {
+      const res = await fetch(`${STRAPI_URL}/api/orders`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json' 

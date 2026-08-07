@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Edit, Trash2, ChevronDown } from 'lucide-react';
+import { STRAPI_URL } from '@/lib/getImageUrl';
 
 interface Pengguna {
   id: number;
@@ -28,8 +29,6 @@ export default function KelolaUser() {
     email: '',
     status: 'Aktif',
   });
-
-  const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
 
   // 1. Fetch Data User dari Backend Strapi
   const fetchUsers = async () => {
