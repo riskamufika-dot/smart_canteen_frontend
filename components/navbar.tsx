@@ -8,27 +8,37 @@ import { LogOut } from 'lucide-react';
 export default function Navbar() {
   const pathname = usePathname();
 
-  // 1. Path persis (exact match) yang ingin disembunyikan
+  // Clean trailing slash di akhir URL
+  const cleanPath = pathname?.endsWith('/') && pathname.length > 1 
+    ? pathname.slice(0, -1) 
+    : pathname;
+
+  // 1. Path persis (exact match)
   const hiddenExactPaths = [
     '/login',
     '/signup',
     '/aboutus',
     '/riwayat',
-
     '/keranjang',
     '/status-pesanan',
-    
+    '/dasboard-admin',
+    '/dashboard-admin',
+    '/kelola-menu',
+    '/daftar-pesanan',
   ];
 
-  // 2. Cek apakah pathname saat ini persis sama dengan salah satu hiddenExactPaths
-  const isExactHidden = hiddenExactPaths.includes(pathname);
+  const isExactHidden = hiddenExactPaths.includes(cleanPath);
 
-  // 3. Cek apakah pathname diawali dengan /menu/ (khusus halaman detail seperti /menu/1, /menu/2, dll.)
-  // Catatan: Jika halaman utama daftar menu ada di /menu, ini HANYA menyembunyikan halaman detailnya (/menu/...)
-  const isMenuDetailHidden = pathname.startsWith('/menu/');
+  // 2. Cek halaman dinamis / awalan path (startsWith)
+  const isDynamicHidden = 
+    cleanPath.startsWith('/dasboard-admin') ||
+    cleanPath.startsWith('/kelola-menu') ||
+    cleanPath.startsWith('/menu/') ||
+    cleanPath.startsWith('/admin-aplikasi/') ||
+    cleanPath.startsWith('/daftar-pesanan/'); // <-- Menyembunyikan semua halaman detail /daftar-pesanan/[id]
 
-  // Jika cocok dengan salah satu kondisi di atas, sembunyikan Navbar
-  if (isExactHidden || isMenuDetailHidden) {
+  // Jika cocok salah satu, langsung sembunyikan
+  if (isExactHidden || isDynamicHidden) {
     return null;
   }
 

@@ -30,7 +30,7 @@ export default function LaporanPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 p-10 font-sans text-slate-800">
-      <div className="max-w-5xl mx-auto bg-white border border-slate-100 rounded-3xl p-8 shadow-sm">
+      <div className="mx-auto bg-white border border-slate-100 rounded-3xl p-8 shadow-sm">
         
         {/* Header Section */}
         <div className="flex items-center gap-4 mb-8">

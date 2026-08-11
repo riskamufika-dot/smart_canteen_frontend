@@ -3,7 +3,9 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Edit, Trash2, ChevronDown } from 'lucide-react';
-import { STRAPI_URL } from '@/lib/getImageUrl';
+
+const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
+const API_TOKEN = process.env.NEXT_PUBLIC_STRAPI_API_TOKEN;
 
 interface Pengguna {
   id: number;
@@ -16,11 +18,9 @@ interface Pengguna {
 export default function KelolaUser() {
   const router = useRouter();
 
-  // State Data Pengguna dari Strapi
   const [dataPengguna, setDataPengguna] = useState<Pengguna[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Modal & Form State
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
@@ -30,17 +30,48 @@ export default function KelolaUser() {
     status: 'Aktif',
   });
 
-  // 1. Fetch Data User dari Backend Strapi
+  // Helper Ambil Header Aman (TIDAK akan pernah mengirim token null/undefined)
+  const getHeaders = () => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    let token: string | null = null;
+
+    if (API_TOKEN && API_TOKEN !== 'undefined') {
+      token = API_TOKEN;
+    } else if (typeof window !== 'undefined') {
+      const localToken = localStorage.getItem('token');
+      if (localToken && localToken !== 'null' && localToken !== 'undefined') {
+        token = localToken;
+      }
+    }
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    return headers;
+  };
+
+  // 1. Fetch Data User
   const fetchUsers = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${STRAPI_URL}/api/users`);
-      if (!res.ok) throw new Error('Gagal mengambil data dari Strapi');
+      const res = await fetch(`${STRAPI_URL}/api/users`, {
+        method: 'GET',
+        headers: getHeaders(),
+      });
+
+      // Hindari 'throw new Error' agar halaman tidak muncul overlay merah
+      if (!res.ok) {
+        console.warn('Strapi menolak request fetch users. Status:', res.status);
+        setDataPengguna([]);
+        return;
+      }
 
       const data = await res.json();
-
-      // Format data Strapi agar sesuai dengan UI
-      const formattedData: Pengguna[] = data.map((user: any) => ({
+      const formattedData: Pengguna[] = (Array.isArray(data) ? data : []).map((user: any) => ({
         id: user.id,
         username: user.username,
         email: user.email,
@@ -51,6 +82,7 @@ export default function KelolaUser() {
       setDataPengguna(formattedData);
     } catch (error) {
       console.error('Error fetching users:', error);
+      setDataPengguna([]);
     } finally {
       setLoading(false);
     }
@@ -60,45 +92,56 @@ export default function KelolaUser() {
     fetchUsers();
   }, []);
 
-  // 2. Toggle Status Aktif / Non-Aktif
+  // 2. Toggle Status
   const toggleStatus = async (user: Pengguna) => {
     const statusBaru = user.status === 'Aktif' ? 'Non-Aktif' : 'Aktif';
     const isBlocked = statusBaru === 'Non-Aktif';
 
-    // Update State Lokal Dulu (Optimistic UI)
+    // Optimistic UI Update
     setDataPengguna((prev) =>
       prev.map((u) => (u.id === user.id ? { ...u, status: statusBaru, blocked: isBlocked } : u))
     );
 
     try {
-      await fetch(`${STRAPI_URL}/api/users/${user.id}`, {
+      const res = await fetch(`${STRAPI_URL}/api/users/${user.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders(),
         body: JSON.stringify({ blocked: isBlocked }),
       });
+
+      if (!res.ok) {
+        console.warn('Gagal mengubah status di Strapi');
+        fetchUsers(); // Rollback jika server menolak
+      }
     } catch (error) {
       console.error('Gagal memperbarui status:', error);
-      fetchUsers(); // Rollback jika error
+      fetchUsers();
     }
   };
 
-  // 3. Hapus Data Pengguna dari Strapi
+  // 3. Hapus User
   const handleDelete = async (id: number) => {
     if (!confirm('Apakah Anda yakin ingin menghapus pengguna ini?')) return;
 
     setDataPengguna((prev) => prev.filter((user) => user.id !== id));
 
     try {
-      await fetch(`${STRAPI_URL}/api/users/${id}`, {
+      const res = await fetch(`${STRAPI_URL}/api/users/${id}`, {
         method: 'DELETE',
+        headers: getHeaders(),
       });
+
+      if (!res.ok) {
+        console.warn('Gagal menghapus pengguna di Strapi');
+        fetchUsers();
+      }
     } catch (error) {
       console.error('Gagal menghapus pengguna:', error);
       fetchUsers();
     }
   };
 
-  // 4. Buka Modal Edit
+  // 4. Modal Edit
   const handleOpenEditModal = (user: Pengguna) => {
     setSelectedId(user.id);
     setFormData({
@@ -109,7 +152,7 @@ export default function KelolaUser() {
     setIsModalOpen(true);
   };
 
-  // 5. Submit Update Data ke Strapi
+  // 5. Update User
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.namaPengguna || !formData.email || selectedId === null) return;
@@ -119,7 +162,7 @@ export default function KelolaUser() {
     try {
       const res = await fetch(`${STRAPI_URL}/api/users/${selectedId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders(),
         body: JSON.stringify({
           username: formData.namaPengguna,
           email: formData.email,
@@ -127,9 +170,11 @@ export default function KelolaUser() {
         }),
       });
 
-      if (!res.ok) throw new Error('Gagal memperbarui data pengguna');
+      if (!res.ok) {
+        alert('Gagal mengupdate data di Strapi.');
+        return;
+      }
 
-      // Update State Lokal
       setDataPengguna((prev) =>
         prev.map((user) =>
           user.id === selectedId
@@ -152,7 +197,7 @@ export default function KelolaUser() {
   };
 
   return (
-    <div className="relative min-h-screen bg-slate-100 p-4 sm:p-6 lg:p-8 text-slate-800">
+    <div className="relative min-h-screen bg-slate-100 p-4 sm:p-6 lg:p-8 text-slate-800 font-sans">
       <div className="mx-auto max-w-4xl rounded-2xl sm:rounded-3xl bg-white p-4 sm:p-6 lg:p-8 shadow-xl">
         
         {/* Header */}
@@ -160,8 +205,8 @@ export default function KelolaUser() {
           <div className="flex items-center gap-3">
             <button
               onClick={() => router.back()}
-              className="flex h-9 w-9 items-center justify-center rounded-full transition-colors hover:bg-slate-100"
-              title="Kembali ke Dashboard"
+              className="flex h-9 w-9 items-center justify-center rounded-full transition-colors hover:bg-slate-100 cursor-pointer"
+              title="Kembali"
             >
               <ArrowLeft className="h-5 w-5 text-slate-700" />
             </button>
@@ -200,11 +245,10 @@ export default function KelolaUser() {
                         {user.email}
                       </td>
 
-                      {/* Status Button Toggle */}
                       <td className="px-3.5 sm:px-6 py-3 text-center whitespace-nowrap">
                         <button
                           onClick={() => toggleStatus(user)}
-                          className={`inline-block rounded-full border px-3 sm:px-4 py-1 text-[10px] sm:text-xs font-medium transition-all active:scale-95 ${
+                          className={`inline-block rounded-full border px-3 sm:px-4 py-1 text-[10px] sm:text-xs font-medium transition-all active:scale-95 cursor-pointer ${
                             user.status === 'Aktif'
                               ? 'border-emerald-400 bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
                               : 'border-rose-400 bg-rose-50 text-rose-600 hover:bg-rose-100'
@@ -214,19 +258,18 @@ export default function KelolaUser() {
                         </button>
                       </td>
 
-                      {/* Aksi Edit & Delete */}
                       <td className="px-3.5 sm:px-6 py-3 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-2 sm:gap-3">
                           <button
                             onClick={() => handleOpenEditModal(user)}
-                            className="p-1 text-slate-600 transition-colors hover:text-orange-500"
+                            className="p-1 text-slate-600 transition-colors hover:text-orange-500 cursor-pointer"
                             title="Edit"
                           >
                             <Edit className="h-4 w-4" />
                           </button>
                           <button
                             onClick={() => handleDelete(user.id)}
-                            className="p-1 text-slate-600 transition-colors hover:text-red-600"
+                            className="p-1 text-slate-600 transition-colors hover:text-red-600 cursor-pointer"
                             title="Hapus"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -281,7 +324,7 @@ export default function KelolaUser() {
                   <select
                     value={formData.status}
                     onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                    className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs sm:text-sm font-medium outline-none focus:border-orange-500 transition-all"
+                    className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs sm:text-sm font-medium outline-none focus:border-orange-500 transition-all cursor-pointer"
                   >
                     <option value="Aktif">Aktif</option>
                     <option value="Non-Aktif">Non-Aktif</option>
@@ -294,13 +337,13 @@ export default function KelolaUser() {
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="w-full sm:w-auto rounded-xl border border-slate-200 bg-white px-6 py-2.5 text-xs sm:text-sm font-bold text-slate-900 hover:bg-slate-50 transition-colors"
+                  className="w-full sm:w-auto rounded-xl border border-slate-200 bg-white px-6 py-2.5 text-xs sm:text-sm font-bold text-slate-900 hover:bg-slate-50 transition-colors cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="w-full sm:w-auto rounded-xl bg-orange-500 px-6 py-2.5 text-xs sm:text-sm font-bold text-white shadow-sm hover:bg-orange-600 transition-colors"
+                  className="w-full sm:w-auto rounded-xl bg-orange-500 px-6 py-2.5 text-xs sm:text-sm font-bold text-white shadow-sm hover:bg-orange-600 transition-colors cursor-pointer"
                 >
                   Update
                 </button>

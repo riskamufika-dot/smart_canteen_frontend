@@ -30,7 +30,7 @@ export default function AuthPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            username: `${fullName} (${kelas})`, // Hasil: "imelda novianti (XII PPLG 4)"
+            username: `${fullName} (${kelas})`,
             email: email,
             password: password,
           }),
@@ -60,7 +60,7 @@ export default function AuthPage() {
         localStorage.setItem('user', JSON.stringify(data.user));
 
         alert('Login berhasil!');
-        router.push('/dashboard-pelanggan'); // Arahkan ke halaman utama pelanggan
+        router.push('/home');
       }
     } catch (err: any) {
       setErrorMsg(err.message);

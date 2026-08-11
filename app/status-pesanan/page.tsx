@@ -1,17 +1,24 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Home } from 'lucide-react';
+import { ArrowLeft, Home, Utensils } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { STRAPI_URL } from '@/lib/getImageUrl';
+
+const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
 
 interface OrderItem {
   id?: number | string;
   name?: string;
   nama?: string;
+  nama_makanan?: string;
+  nama_menu?: string;
   price?: number;
   harga?: number;
   quantity?: number;
+  qty?: number;
+  jumlah?: number;
+  notes?: string;
+  note?: string;
 }
 
 interface OrderData {
@@ -32,113 +39,187 @@ export default function StatusPesananPage() {
   const [order, setOrder] = useState<OrderData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Ambil data pesanan (Mendahulukan transaksi terbaru dari LocalStorage, lalu sync Strapi)
-  const fetchLatestOrder = async () => {
-    let latestData: OrderData | null = null;
+  // PARSER PRESISI: Membongkar relasi Strapi (items -> menu -> attributes)
+  const parseItems = (rawItemsInput: any): OrderItem[] => {
+    let parsed: any[] = [];
+    if (!rawItemsInput) return [];
 
-    // 1. Ambil dari LocalStorage terlebih dahulu
-    try {
-      const savedOrders = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
-      if (savedOrders.length > 0) {
-        const lastOrder = savedOrders[savedOrders.length - 1];
-        const raw = lastOrder.data || lastOrder;
-
-        latestData = {
-          id: raw.id || 1,
-          orderId: raw.orderId || `#SC${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-001`,
-          createdAt: raw.createdAt || new Date().toISOString(),
-          updatedAt: raw.updatedAt || new Date().toISOString(),
-          status: raw.status || 'pending',
-          totalPrice: Number(raw.totalPrice || raw.total) || 0,
-          items: Array.isArray(raw.items) ? raw.items : [],
-          pickupDate: raw.pickupDate || '-',
-          pickupTime: raw.pickupTime || '06.15 WIB',
-          paymentMethod: raw.paymentMethod || 'Cash',
-        };
+    if (typeof rawItemsInput === 'string') {
+      try {
+        parsed = JSON.parse(rawItemsInput);
+      } catch (e) {
+        parsed = [];
       }
-    } catch (e) {
-      console.error('Gagal membaca LocalStorage:', e);
+    } else if (Array.isArray(rawItemsInput)) {
+      parsed = rawItemsInput;
     }
 
-    // 2. Jika Strapi online, cek update status real-time dari backend
-    try {
-      const res = await fetch(
-        `${STRAPI_URL}/api/orders?sort[0]=createdAt:desc&pagination[limit]=1`
-      );
+    if (!Array.isArray(parsed)) return [];
 
-      if (res.ok) {
-        const result = await res.json();
-        if (result.data && result.data.length > 0) {
-          const raw = result.data[0];
-          const attributes = raw.attributes ? { ...raw.attributes, id: raw.id } : raw;
+    return parsed.map((it: any) => {
+      const attr = it.attributes || it;
+      const menuObj = attr.menu?.data?.attributes || attr.menu?.data || attr.menu || {};
 
-          if (latestData) {
-            latestData.status = attributes.menu_status || attributes.status || latestData.status;
-            latestData.updatedAt = attributes.updatedAt || latestData.updatedAt;
-          } else {
-            latestData = {
-              id: raw.id,
-              orderId: attributes.order_id || attributes.orderId || `#SC-${raw.id}`,
-              createdAt: attributes.createdAt || new Date().toISOString(),
-              updatedAt: attributes.updatedAt || new Date().toISOString(),
-              status: attributes.menu_status || attributes.status || 'pending',
-              totalPrice: Number(attributes.total_price || attributes.totalPrice) || 0,
-              items: Array.isArray(attributes.items) ? attributes.items : [],
-              pickupDate: attributes.pickup_date || '-',
-              pickupTime: attributes.pickup_time || '06.15 WIB',
-              paymentMethod: attributes.payment_method || 'Cash',
-            };
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('Backend Strapi offline, menggunakan data lokal.');
-    }
+      const name = menuObj.name || menuObj.nama || attr.name || attr.nama || attr.nama_makanan || attr.nama_menu || 'Makanan';
+      const price = Number(menuObj.price || menuObj.harga || attr.price || attr.harga || 0);
+      const quantity = Number(attr.quantity || attr.qty || attr.jumlah || 1);
+      const notes = attr.notes || attr.note || '';
 
-    setOrder(latestData);
-    setLoading(false);
+      return {
+        ...attr,
+        name,
+        price,
+        quantity,
+        notes,
+      };
+    });
   };
 
   useEffect(() => {
+    let isMounted = true;
+
+    async function fetchLatestOrder() {
+      let latestData: OrderData | null = null;
+
+      // 1. Fetch live order dari Strapi
+      try {
+        const res = await fetch(
+          `${STRAPI_URL}/api/orders?populate[items][populate]=*&sort[0]=createdAt:desc&pagination[limit]=1`
+        );
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data && json.data.length > 0) {
+            const raw = json.data[0];
+            const attr = raw.attributes ? { ...raw.attributes, id: raw.id } : raw;
+
+            const parsedItems = parseItems(attr.items || attr.order_items || attr.menu_items || attr.details);
+            const calculatedTotal = parsedItems.reduce(
+              (sum, it) => sum + Number(it.price || 0) * Number(it.quantity || 1),
+              0
+            );
+
+            const rawStatus = String(attr.menu_status || attr.status || attr.order_status || '').toLowerCase();
+            let normStatus = 'Menunggu Konfirmasi';
+            if (rawStatus.includes('disiapkan') || rawStatus.includes('proses')) {
+              normStatus = 'Sedang Disiapkan';
+            } else if (rawStatus.includes('siap')) {
+              normStatus = 'Siap Diambil';
+            } else if (rawStatus.includes('selesai')) {
+              normStatus = 'Selesai';
+            }
+
+            latestData = {
+              id: raw.id,
+              orderId: attr.order_id || attr.orderId || `#SC-${raw.id}`,
+              createdAt: attr.createdAt || new Date().toISOString(),
+              updatedAt: attr.updatedAt || new Date().toISOString(),
+              status: normStatus,
+              totalPrice: Number(attr.total_price || attr.totalPrice) || calculatedTotal,
+              items: parsedItems,
+              pickupDate: attr.pickup_date || attr.pickupDate || '-',
+              pickupTime: attr.pickup_time || attr.pickupTime || '06.15 WIB',
+              paymentMethod: (attr.payment_method || attr.paymentMethod || 'CASH').toUpperCase(),
+            };
+          }
+        }
+      } catch (e) {
+        console.warn('Gagal ambil data Strapi, beralih ke LocalStorage:', e);
+      }
+
+      // 2. Fallback ke LocalStorage jika Strapi offline / kosong
+      if (!latestData || !latestData.items || latestData.items.length === 0) {
+        try {
+          const savedOrders = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
+          if (savedOrders.length > 0) {
+            const lastOrder = savedOrders[0];
+            const raw = lastOrder.data || lastOrder;
+            const parsedItems = parseItems(raw.items);
+
+            const rawStatus = String(raw.status || raw.menu_status || raw.order_status || '').toLowerCase();
+            let normStatus = 'Menunggu Konfirmasi';
+            if (rawStatus.includes('disiapkan') || rawStatus.includes('proses')) {
+              normStatus = 'Sedang Disiapkan';
+            } else if (rawStatus.includes('siap')) {
+              normStatus = 'Siap Diambil';
+            } else if (rawStatus.includes('selesai')) {
+              normStatus = 'Selesai';
+            }
+
+            const calculatedTotal = parsedItems.reduce(
+              (sum, it) => sum + Number(it.price || 0) * Number(it.quantity || 1),
+              0
+            );
+
+            latestData = {
+              id: raw.id || 1,
+              orderId: raw.orderId || raw.order_id || `#SC001`,
+              createdAt: raw.createdAt || new Date().toISOString(),
+              updatedAt: raw.updatedAt || new Date().toISOString(),
+              status: normStatus,
+              totalPrice: Number(raw.totalPrice || raw.total_price) || calculatedTotal,
+              items: parsedItems,
+              pickupDate: raw.pickupDate || raw.pickup_date || '-',
+              pickupTime: raw.pickupTime || raw.pickup_time || '06.15 WIB',
+              paymentMethod: (raw.paymentMethod || raw.payment_method || 'CASH').toUpperCase(),
+            };
+          }
+        } catch (e) {
+          console.error('Gagal membaca LocalStorage:', e);
+        }
+      }
+
+      if (isMounted) {
+        setOrder(latestData);
+        setLoading(false);
+      }
+    }
+
+    // 1. Fetch pertama kali saat masuk halaman
     fetchLatestOrder();
 
-    // Refresh otomatis setiap 4 detik
-    const interval = setInterval(() => {
+    // 2. Terapkan Auto-Polling (Cek update tiap 3 detik)
+    const intervalId = setInterval(() => {
       fetchLatestOrder();
-    }, 4000);
+    }, 3000);
 
-    return () => clearInterval(interval);
+    // Cleanup interval ketika komponen di-unmount / ditutup
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
   }, []);
 
-  // Format Tanggal
   const formatDate = (dateString?: string) => {
     if (!dateString) return '-';
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return '-';
-    return date.toLocaleDateString('id-ID', {
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).replace('.', ':');
+    return date
+      .toLocaleDateString('id-ID', {
+        day: '2-digit',
+        month: 'long',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+      .replace('.', ':');
   };
 
-  // Format Jam Saja
   const formatTime = (dateString?: string) => {
     if (!dateString) return '';
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return '';
-    return date.toLocaleTimeString('id-ID', {
-      hour: '2-digit',
-      minute: '2-digit',
-    }).replace('.', ':');
+    return date
+      .toLocaleTimeString('id-ID', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+      .replace('.', ':');
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen w-full flex items-center justify-center bg-white">
-        <p className="text-gray-400 font-medium">Memuat status pesanan...</p>
+      <div className="min-h-screen w-full flex items-center justify-center bg-white font-sans font-bold text-gray-400">
+        Memuat status pesanan...
       </div>
     );
   }
@@ -149,7 +230,7 @@ export default function StatusPesananPage() {
         <p className="text-gray-600 font-medium">Belum ada pesanan aktif.</p>
         <button
           onClick={() => router.push('/home')}
-          className="px-5 py-2.5 bg-[#52C453] text-white font-semibold rounded-full hover:bg-green-600 transition-colors"
+          className="px-5 py-2.5 bg-[#52C453] text-white font-semibold rounded-full hover:bg-green-600 transition-colors cursor-pointer"
         >
           Pesan Makanan
         </button>
@@ -157,28 +238,33 @@ export default function StatusPesananPage() {
     );
   }
 
-  // Pemetaan Status Pesanan (Mendukung format Enum Strapi & LocalStorage)
-  const statusSteps = [
-    { keys: ['pending', 'menunggu konfirmasi'], label: 'Menunggu Konfirmasi', desc: 'Pesananmu telah diterima oleh penjual' },
-    { keys: ['sedang_disiapkan', 'sedang diproses', 'sedang disiapkan'], label: 'Sedang Disiapkan', desc: 'Pesananmu sedang disiapkan' },
-    { keys: ['siap_diambil', 'siap diambil'], label: 'Siap Diambil', desc: 'Pesananmu sudah siap' },
-    { keys: ['selesai'], label: 'Selesai', desc: 'Pesanan telah diambil' },
-  ];
+  const rawStatusText = String(order.status || '').toLowerCase();
+  let currentStatusIndex = 0;
+  if (rawStatusText.includes('disiapkan') || rawStatusText.includes('proses')) {
+    currentStatusIndex = 1;
+  } else if (rawStatusText.includes('siap')) {
+    currentStatusIndex = 2;
+  } else if (rawStatusText.includes('selesai')) {
+    currentStatusIndex = 3;
+  }
 
-  const normalizedStatus = (order.status || '').toLowerCase();
-  const currentStatusIndex = statusSteps.findIndex((step) =>
-    step.keys.includes(normalizedStatus)
-  );
+  const isCompletedOrder = currentStatusIndex === 3;
+
+  const statusSteps = [
+    { label: 'Menunggu Konfirmasi', desc: 'Pesananmu telah diterima oleh penjual' },
+    { label: 'Sedang Disiapkan', desc: 'Pesananmu sedang disiapkan' },
+    { label: 'Siap Diambil', desc: 'Pesananmu sudah siap diambil' },
+    { label: 'Selesai', desc: 'Pesanan telah selesai' },
+  ];
 
   return (
     <div className="w-full min-h-screen bg-white font-sans text-gray-900 py-6 px-4 sm:px-8">
       <main className="w-full space-y-6">
-        
-        {/* HEADER ATAS */}
+
         <div className="flex items-center justify-between pb-4 border-b border-gray-100">
           <button
-            onClick={() => router.back()}
-            className="text-gray-900 hover:text-orange-500 transition-colors p-1 -ml-1"
+            onClick={() => router.push('/home')}
+            className="text-gray-900 hover:text-orange-500 transition-colors p-1 -ml-1 cursor-pointer"
           >
             <ArrowLeft size={26} />
           </button>
@@ -189,13 +275,12 @@ export default function StatusPesananPage() {
 
           <button
             onClick={() => router.push('/home')}
-            className="text-gray-900 hover:text-orange-500 transition-colors p-1"
+            className="text-gray-900 hover:text-orange-500 transition-colors p-1 cursor-pointer"
           >
             <Home size={24} />
           </button>
         </div>
 
-        {/* BOX INFORMASI ORDER ID & TANGGAL */}
         <div className="bg-[#FFF8EE] border border-orange-200/80 rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row justify-between gap-4 w-full">
           <div className="space-y-1">
             <span className="text-sm font-semibold text-gray-400">Order ID</span>
@@ -211,18 +296,16 @@ export default function StatusPesananPage() {
           </div>
         </div>
 
-        {/* TIMELINE STATUS PESANAN */}
         <div className="py-4 px-2 space-y-8 relative w-full">
           {statusSteps.map((step, idx) => {
-            const activeIdx = currentStatusIndex < 0 ? 0 : currentStatusIndex;
-            const isCompleted = idx <= activeIdx;
-            const isCurrent = idx === activeIdx;
+            const isCompleted = idx <= currentStatusIndex;
+            const isCurrent = idx === currentStatusIndex;
 
             let bgClass = 'bg-gray-200 text-gray-400';
             if (isCompleted) {
               if (idx === 0 || idx === 1) bgClass = 'bg-[#F28728] text-white';
               if (idx === 2) bgClass = 'bg-[#52C453] text-white';
-              if (idx === 3) bgClass = 'bg-gray-400 text-white';
+              if (idx === 3) bgClass = 'bg-gray-700 text-white';
             }
 
             return (
@@ -230,15 +313,13 @@ export default function StatusPesananPage() {
                 {idx < statusSteps.length - 1 && (
                   <div
                     className={`absolute left-5 top-10 w-0.5 h-12 -ml-[1px] ${
-                      idx < activeIdx ? 'bg-orange-400' : 'bg-gray-200'
+                      idx < currentStatusIndex ? 'bg-orange-400' : 'bg-gray-200'
                     }`}
                   />
                 )}
 
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 z-10 font-bold transition-all ${bgClass}`}>
-                  <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
-                    <path d="M11 9H9V2H7v7H5V2H3v7c0 2.12 1.46 3.91 3.45 4.38L6 22h2l.55-8.62C10.54 12.91 12 11.12 12 9V2h-1v7zm7-7s-3 0-3 5v5h2v10h2V2z" />
-                  </svg>
+                  <Utensils size={18} />
                 </div>
 
                 <div className="flex-1 min-w-0 flex items-start justify-between gap-2 pt-1">
@@ -260,7 +341,20 @@ export default function StatusPesananPage() {
           })}
         </div>
 
-        {/* INFORMASI WAKTU PENGAMBILAN & METODE PEMBAYARAN */}
+        {isCompletedOrder && (
+          <div className="bg-green-50 border border-green-200 rounded-2xl p-4 text-center space-y-3 animate-in fade-in duration-300">
+            <p className="text-sm text-green-800 font-bold">
+              🎉 Pesanan ini telah selesai dan tersimpan di Riwayat!
+            </p>
+            <button
+              onClick={() => router.push('/riwayat')}
+              className="px-6 py-2.5 bg-[#52C453] hover:bg-green-600 text-white font-bold text-sm rounded-xl transition-all cursor-pointer shadow-sm"
+            >
+              Lihat Riwayat Pesanan
+            </button>
+          </div>
+        )}
+
         <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4 space-y-2 text-sm w-full">
           <div className="flex justify-between items-center">
             <span className="text-gray-500 font-medium">Tanggal Pengambilan:</span>
@@ -276,28 +370,33 @@ export default function StatusPesananPage() {
           </div>
         </div>
 
-        {/* RINCIAN DETAIL PESANAN */}
-        <div className="bg-white border border-gray-200 rounded-3xl p-5 sm:p-6 space-y-4 shadow-sm w-full">
-          <h3 className="text-base sm:text-lg font-bold text-gray-900 pb-2 border-b border-gray-100">
+        <div className="bg-[#FFF8EE] border border-orange-200/80 rounded-3xl p-5 sm:p-6 space-y-4 shadow-xs w-full">
+          <h3 className="text-base sm:text-lg font-bold text-gray-900 pb-2 border-b border-orange-200/60">
             Detail Pesanan
           </h3>
 
           <div className="space-y-3">
-            {order.items && order.items.length > 0 ? (
+            {order.items && Array.isArray(order.items) && order.items.length > 0 ? (
               order.items.map((item, index) => {
-                const name = item.name || item.nama || 'Item Makanan';
-                const qty = Number(item.quantity) || 1;
-                const price = Number(item.price ?? item.harga) || 0;
+                const name = item.name || item.nama || item.nama_makanan || item.nama_menu || 'Makanan';
+                const qty = Number(item.quantity || item.qty || item.jumlah) || 1;
+                const price = Number(item.price || item.harga) || 0;
+                const note = item.notes || item.note;
 
                 return (
-                  <div key={index} className="flex items-center justify-between text-sm sm:text-base font-medium">
-                    <div className="flex items-center gap-4">
-                      <span className="text-gray-900 font-bold">{qty}x</span>
-                      <span className="text-gray-800">{name}</span>
+                  <div key={index} className="flex flex-col gap-1 border-b border-orange-100/60 last:border-none pb-2 last:pb-0">
+                    <div className="flex items-center justify-between text-sm sm:text-base font-medium">
+                      <div className="flex items-center gap-4">
+                        <span className="text-gray-900 font-bold">{qty}x</span>
+                        <span className="text-gray-800">{name}</span>
+                      </div>
+                      <span className="font-bold text-gray-900">
+                        Rp {(price * qty).toLocaleString('id-ID')}
+                      </span>
                     </div>
-                    <span className="font-bold text-gray-900">
-                      Rp {(price * qty).toLocaleString('id-ID')}
-                    </span>
+                    {note && (
+                      <p className="text-xs text-gray-500 italic ml-8">Catatan: {note}</p>
+                    )}
                   </div>
                 );
               })
@@ -306,7 +405,7 @@ export default function StatusPesananPage() {
             )}
           </div>
 
-          <div className="pt-4 border-t border-gray-100 flex items-center justify-between">
+          <div className="pt-4 border-t border-orange-200/80 flex items-center justify-between">
             <span className="text-base sm:text-lg font-bold text-gray-900">Total Pembayaran</span>
             <span className="text-lg sm:text-xl font-extrabold text-[#F28728]">
               Rp {Number(order.totalPrice || 0).toLocaleString('id-ID')}
@@ -317,4 +416,4 @@ export default function StatusPesananPage() {
       </main>
     </div>
   );
-} 
+}

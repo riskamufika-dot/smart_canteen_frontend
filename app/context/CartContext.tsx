@@ -2,15 +2,18 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
+// app/context/CartContext.tsx
+
 export interface CartItem {
   id: number | string;
   documentId?: string;
   name: string;
   price: number;
   quantity: number;
-  note?: string;
   image?: string;
-  selected?: boolean; // Status centang (true/false)
+  note?: string;    // 👈 Tambahkan ini jika belum ada
+  notes?: string;   // 👈 Tambahkan ini agar tidak error di TypeScript
+  selected?: boolean;
 }
 
 interface CartContextType {

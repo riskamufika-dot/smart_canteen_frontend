@@ -3,7 +3,53 @@
 import React, { useState, useEffect } from 'react';
 import { Star, Plus, ArrowLeft } from 'lucide-react';
 import { useRouter, useParams } from 'next/navigation';
-import { getImageUrl, STRAPI_URL } from '@/lib/getImageUrl';
+
+// CONFIG STRAPI URL LOKAL TANPA FILE LIB
+const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
+
+// 1. HELPER KHUSUS AMBIL GAMBAR BANNER TOKO
+const getStoreBannerUrl = (tenantData: any): string => {
+  if (!tenantData) return '';
+  const attr = tenantData.attributes || tenantData;
+  const rawImg = attr.banner || attr.benner || attr.image || attr.foto || attr.gambar || attr.cover;
+
+  if (!rawImg) return '';
+
+  if (typeof rawImg === 'string') {
+    if (rawImg.startsWith('http://') || rawImg.startsWith('https://')) return rawImg;
+    return `${STRAPI_URL}${rawImg.startsWith('/') ? '' : '/'}${rawImg}`;
+  }
+
+  const url = rawImg?.data?.attributes?.url || rawImg?.data?.url || rawImg?.attributes?.url || rawImg?.url;
+  if (url) {
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    return `${STRAPI_URL}${url.startsWith('/') ? '' : '/'}${url}`;
+  }
+
+  return '';
+};
+
+// 2. HELPER KHUSUS AMBIL GAMBAR PRODUK MAKANAN
+const getMenuProductUrl = (menuData: any): string => {
+  if (!menuData) return '';
+  const attr = menuData.attributes || menuData;
+  const rawImg = attr.image || attr.foto || attr.gambar;
+
+  if (!rawImg) return '';
+
+  if (typeof rawImg === 'string') {
+    if (rawImg.startsWith('http://') || rawImg.startsWith('https://')) return rawImg;
+    return `${STRAPI_URL}${rawImg.startsWith('/') ? '' : '/'}${rawImg}`;
+  }
+
+  const url = rawImg?.data?.attributes?.url || rawImg?.data?.url || rawImg?.attributes?.url || rawImg?.url;
+  if (url) {
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    return `${STRAPI_URL}${url.startsWith('/') ? '' : '/'}${url}`;
+  }
+
+  return '';
+};
 
 export default function TokoDetailPage() {
   const router = useRouter();
@@ -62,6 +108,7 @@ export default function TokoDetailPage() {
 
   const tenantObj = tenant?.attributes || tenant;
   const storeName = tenantObj?.name || tenantObj?.nama || 'Toko Kami';
+  const storeBannerImg = getStoreBannerUrl(tenant);
 
   return (
     <div className="min-h-screen bg-[#FDFDFD] pb-20 w-full overflow-x-hidden">
@@ -70,18 +117,24 @@ export default function TokoDetailPage() {
         {/* TOMBOL BACK */}
         <button 
           onClick={() => router.back()}
-          className="mb-4 flex items-center gap-2 text-gray-700 hover:text-orange-500 transition-colors"
+          className="mb-4 flex items-center gap-2 text-gray-700 hover:text-orange-500 transition-colors cursor-pointer"
         >
           <ArrowLeft size={24} />
         </button>
 
         {/* BANNER TOKO */}
         <div className="relative h-48 sm:h-64 md:h-80 w-full overflow-hidden rounded-[24px] sm:rounded-[36px] bg-gray-100 shadow-sm">
-          <img 
-            src={getImageUrl(tenant)} 
-            alt={storeName} 
-            className="w-full h-full object-cover object-center"
-          />
+          {storeBannerImg ? (
+            <img 
+              src={storeBannerImg} 
+              alt={storeName} 
+              className="w-full h-full object-cover object-center"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-gray-200 text-gray-500 font-medium">
+              {storeName}
+            </div>
+          )}
         </div>
 
         {/* TITLE MENU KAMI */}
@@ -94,17 +147,25 @@ export default function TokoDetailPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {menus.map((menu: any) => {
                 const menuData = menu.attributes || menu;
+                const menuImgSrc = getMenuProductUrl(menuData);
+
                 return (
                   <div 
                     key={menu.id} 
                     className="flex items-center gap-4 sm:gap-6 rounded-[28px] border border-gray-100 bg-white p-4 sm:p-5 shadow-sm transition-all hover:shadow-md"
                   >
                     <div className="h-28 w-28 sm:h-32 sm:w-32 flex-shrink-0 overflow-hidden rounded-2xl bg-gray-100">
-                      <img 
-                        src={getImageUrl(menu)} 
-                        alt={menuData.name || 'Menu'} 
-                        className="h-full w-full object-cover" 
-                      />
+                      {menuImgSrc ? (
+                        <img 
+                          src={menuImgSrc} 
+                          alt={menuData.name || 'Menu'} 
+                          className="h-full w-full object-cover" 
+                        />
+                      ) : (
+                        <div className="h-full w-full flex items-center justify-center text-xs text-gray-400 bg-gray-50">
+                          No Image
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex flex-grow flex-col justify-between py-1 h-full min-w-0">
@@ -126,7 +187,7 @@ export default function TokoDetailPage() {
                       <div className="flex justify-end mt-2">
                         <button 
                           onClick={() => router.push(`/menu/${menu.documentId || menu.id}`)}
-                          className="rounded-2xl bg-orange-500 p-2.5 sm:p-3 text-black shadow-md transition-all hover:bg-orange-600 active:scale-95"
+                          className="rounded-2xl bg-orange-500 p-2.5 sm:p-3 text-black shadow-md transition-all hover:bg-orange-600 active:scale-95 cursor-pointer"
                           title="Lihat Detail Produk"
                         >
                           <Plus size={20} className="text-black" />

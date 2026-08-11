@@ -3,7 +3,9 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Bell, Star, RefreshCw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { STRAPI_URL } from '@/lib/getImageUrl';
+
+// CONFIG STRAPI URL LOKAL TANPA FILE LIB
+const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
 
 interface OrderItem {
   id?: number | string;
@@ -41,6 +43,35 @@ export default function RiwayatPage() {
     setLoading(true);
     let orders: OrderData[] = [];
 
+    // 1. Ambil Data dari LocalStorage khusus Riwayat terlebih dahulu
+    try {
+      const historyLocal = JSON.parse(localStorage.getItem('smart_canteen_history') || '[]');
+      const savedOrders = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
+
+      const mergedLocal = [...historyLocal, ...savedOrders];
+      const localFormatted = mergedLocal.map((raw: any) => {
+        const data = raw.data || raw;
+        return {
+          id: data.id || data.orderId,
+          orderId: data.orderId || data.order_id || `#SC-${data.id || 1}`,
+          createdAt: data.createdAt || new Date().toISOString(),
+          status: data.status || 'Selesai',
+          totalPrice: Number(data.totalPrice || data.total_price) || 0,
+          items: Array.isArray(data.items) ? data.items : [],
+          tenantId: data.tenantId || 1,
+          tenantName: data.tenantName || 'Kantin Sekolah',
+          tenantImage: defaultTenantImage,
+          tenantRating: '4.8',
+          userRating: Number(data.rating || data.userRating) || 0,
+        };
+      });
+
+      orders = localFormatted;
+    } catch (e) {
+      console.error('Gagal membaca LocalStorage riwayat:', e);
+    }
+
+    // 2. Ambil dari Strapi Backend jika online
     try {
       const res = await fetch(`${STRAPI_URL}/api/orders?sort[0]=createdAt:desc&populate=*`);
 
@@ -48,7 +79,7 @@ export default function RiwayatPage() {
         const result = await res.json();
         const rawData = result.data || [];
 
-        orders = rawData.map((item: any) => {
+        const strapiOrders = rawData.map((item: any) => {
           const attr = item.attributes ? { ...item.attributes, id: item.id } : item;
           return {
             id: item.id,
@@ -58,38 +89,24 @@ export default function RiwayatPage() {
             totalPrice: Number(attr.total_price || attr.totalPrice) || 0,
             items: Array.isArray(attr.items) ? attr.items : [],
             tenantId: attr.tenant_id || attr.tenantId || 1,
-            tenantName: attr.tenant_name || attr.tenantName || 'Mas Arjo',
+            tenantName: attr.tenant_name || attr.tenantName || 'Kantin Sekolah',
             tenantImage: attr.tenant_image || defaultTenantImage,
             tenantRating: attr.tenant_rating || '4.8',
             userRating: Number(attr.rating || attr.userRating) || 0,
           };
         });
+
+        if (strapiOrders.length > 0) {
+          orders = strapiOrders;
+        }
       }
     } catch (err) {
-      console.warn('Backend Strapi offline, membaca data dari LocalStorage.');
-      const localData = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
-      orders = localData
-        .map((raw: any) => {
-          const data = raw.data || raw;
-          return {
-            id: data.id || data.orderId,
-            orderId: data.orderId || data.order_id || `#SC-${data.id || 1}`,
-            createdAt: data.createdAt || new Date().toISOString(),
-            status: data.status || 'Selesai',
-            totalPrice: Number(data.totalPrice || data.total_price) || 0,
-            items: Array.isArray(data.items) ? data.items : [],
-            tenantId: data.tenantId || 1,
-            tenantName: data.tenantName || 'Mas Arjo',
-            tenantImage: defaultTenantImage,
-            tenantRating: '4.8',
-            userRating: Number(data.rating || data.userRating) || 0,
-          };
-        })
-        .reverse();
+      console.warn('Backend Strapi offline, menggunakan data riwayat dari LocalStorage.');
     }
 
+    // Filter hanya yang berstatus Selesai atau Dibatalkan
     const filtered = orders.filter((o) =>
-      ['selesai', 'dibatalkan', 'Selesai', 'Dibatalkan'].includes(o.status || '')
+      ['selesai', 'dibatalkan', 'Selesai', 'Dibatalkan', 'siap_diambil', 'siap diambil'].includes(o.status || '')
     );
 
     setHistoryOrders(filtered);
@@ -106,7 +123,7 @@ export default function RiwayatPage() {
 
     setRatingLoading(targetOrderKey);
 
-    // 1. Update Tampilan Bintang di UI (Optimistic Update)
+    // 1. Update Tampilan Bintang di UI
     setHistoryOrders((prev) =>
       prev.map((ord) =>
         ord.id === orderItem.id || ord.orderId === orderItem.orderId
@@ -115,7 +132,7 @@ export default function RiwayatPage() {
       )
     );
 
-    // 2. Simpan di LocalStorage (Penyimpanan Cadangan/Offline)
+    // 2. Simpan di LocalStorage
     try {
       const savedRatings = JSON.parse(localStorage.getItem('canteen_user_ratings') || '{}');
       savedRatings[targetOrderKey] = ratingValue;
@@ -129,11 +146,9 @@ export default function RiwayatPage() {
       const tenantId = orderItem.tenantId;
 
       if (tenantId) {
-        // Ambil ID murni angka
         const numericHomeId = typeof tenantId === 'string' ? tenantId.replace(/\D/g, '') : tenantId;
 
         if (numericHomeId) {
-          // Menembak ke /api/homes/:id (Atau /api/home jika Single Type)
           const res = await fetch(`${STRAPI_URL}/api/homes/${numericHomeId}`, {
             method: 'PUT',
             headers: {
@@ -148,8 +163,6 @@ export default function RiwayatPage() {
 
           if (res.ok) {
             console.log(`✅ Rating ${ratingValue} berhasil dikirim ke Home/Tenant ID: ${numericHomeId}`);
-          } else {
-            console.warn('⚠️ Strapi menolak update (Cek izin "update" pada collection Home/Homes di Public Role).');
           }
         }
       }
@@ -162,7 +175,7 @@ export default function RiwayatPage() {
 
   const handleBeliLagi = (order: OrderData) => {
     if (order.tenantId) {
-      router.push(`/tenant/${order.tenantId}`);
+      router.push(`/toko/${order.tenantId}`);
     } else {
       router.push('/home');
     }
@@ -189,7 +202,7 @@ export default function RiwayatPage() {
   };
 
   const formatMenuSummary = (items: OrderItem[]) => {
-    if (!items || items.length === 0) return '1 Mie Bakso + 1 Mie Campur';
+    if (!items || items.length === 0) return 'Pesanan Makanan';
     return items
       .map((it) => `${it.quantity || 1} ${it.name || it.nama || 'Menu'}`)
       .join(' + ');
@@ -231,7 +244,7 @@ export default function RiwayatPage() {
       </header>
 
       {/* KONTEN UTAMA */}
-      <main className="w-full px-4 py-5 space-y-4">
+      <main className="w-full px-4 py-5 space-y-4 max-w-4xl mx-auto">
         {loading ? (
           <div className="py-20 text-center text-gray-400">
             <RefreshCw size={28} className="animate-spin mx-auto mb-2 text-green-500" />
@@ -239,7 +252,8 @@ export default function RiwayatPage() {
           </div>
         ) : historyOrders.length > 0 ? (
           historyOrders.map((order, orderIdx) => {
-            const isSelesai = (order.status || '').toLowerCase() === 'selesai';
+            const normStat = (order.status || '').toLowerCase();
+            const isSelesai = normStat === 'selesai' || normStat === 'siap_diambil' || normStat === 'siap diambil';
             const orderKey = order.id || order.orderId || orderIdx;
             const currentRating = order.userRating || 0;
             const totalItemsCount = (order.items || []).reduce(
@@ -252,7 +266,7 @@ export default function RiwayatPage() {
                 key={orderKey}
                 className="w-full bg-white rounded-3xl p-5 shadow-xs border border-gray-100 flex flex-col gap-4"
               >
-                {/* BARIS ATAS: GAMBAR + INFO LENGKAP RATA KIRI */}
+                {/* BARIS ATAS: GAMBAR + INFO LENGKAP */}
                 <div className="flex items-start gap-4">
                   {/* GAMBAR TENANT DENGAN BADGE RATING */}
                   <div className="relative shrink-0 w-28 h-28 sm:w-32 sm:h-32 rounded-2xl overflow-hidden bg-gray-100">
@@ -272,11 +286,11 @@ export default function RiwayatPage() {
                     </div>
                   </div>
 
-                  {/* INFO TEXT LENGKAP (FORMAT SESUAI SCREENSHOT) */}
+                  {/* INFO TEXT LENGKAP */}
                   <div className="flex-1 min-w-0 flex flex-col space-y-1 text-left">
                     {/* 1. NAMA TENANT */}
                     <h2 className="text-lg font-bold text-gray-900 leading-tight truncate">
-                      {order.tenantName || 'Mas Arjo'}
+                      {order.tenantName || 'Kantin Sekolah'}
                     </h2>
 
                     {/* 2. TANGGAL + STATUS SEJAJAR */}
@@ -295,18 +309,18 @@ export default function RiwayatPage() {
 
                     {/* 4. TOTAL HARGA */}
                     <p className="text-sm font-bold text-gray-900 pt-0.5">
-                      Rp{Number(order.totalPrice || 16000).toLocaleString('id-ID')}
+                      Rp{Number(order.totalPrice || 0).toLocaleString('id-ID')}
                     </p>
 
                     {/* 5. JUMLAH MENU */}
                     <p className="text-[11px] text-gray-400 font-medium">
-                      {totalItemsCount || (order.items || []).length || 2} Menu
+                      {totalItemsCount || (order.items || []).length || 1} Menu
                     </p>
                   </div>
                 </div>
 
                 {/* BARIS BAWAH: PENILAIAN & TOMBOL BELI LAGI */}
-                <div className="flex items-end justify-between pt-2">
+                <div className="flex items-end justify-between pt-2 border-t border-gray-50">
                   <div className="space-y-1">
                     <span className="text-[11px] font-semibold text-gray-400 block">
                       Beri Penilaian Mu
@@ -348,7 +362,7 @@ export default function RiwayatPage() {
             <p className="text-sm font-medium">Belum ada riwayat pesanan.</p>
             <button
               onClick={() => router.push('/home')}
-              className="rounded-full bg-[#52C453] px-5 py-2 text-white font-bold text-xs hover:bg-[#43b044] transition-all"
+              className="rounded-full bg-[#52C453] px-5 py-2 text-white font-bold text-xs hover:bg-[#43b044] transition-all cursor-pointer"
             >
               Cari Makanan
             </button>
