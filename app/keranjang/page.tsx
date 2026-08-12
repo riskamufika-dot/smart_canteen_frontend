@@ -47,34 +47,25 @@ export default function KeranjangPage() {
     }
     setLoading(true);
 
-    // 1. Ambil Data Pelanggan yang Login
     const userLocal = JSON.parse(
       localStorage.getItem('user') || localStorage.getItem('smart_canteen_user') || '{}'
     );
     const namaPelanggan = userLocal.username || userLocal.nama || 'Siswa Pelanggan';
 
-    // 2. Hitung Total Price
     const totalHarga = selectedItems.reduce(
       (sum: number, item: any) => sum + Number(item.price || 0) * Number(item.quantity || 1),
       0
     );
 
-    // 3. Generate Unik order_id
     const generatedOrderId = `#SC${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
 
-    // 4. Format Items Lengkap untuk LocalStorage & Component Strapi
     const localItems = selectedItems.map((item: any) => ({
       id: String(item.id),
-      name: String(item.name || item.nama || 'Makanan'),
       nama: String(item.name || item.nama || 'Makanan'),
-      price: Number(item.price || item.harga || 0),
-      harga: Number(item.price || item.harga || 0),
-      quantity: Number(item.quantity || item.qty || 1),
-      qty: Number(item.quantity || item.qty || 1),
-      image: item.image || item.gambar || '',
-      gambar: item.image || item.gambar || '',
+      harga: Number(item.price || 0),
+      qty: Number(item.quantity || 1),
+      gambar: item.image || '',
       notes: item.notes || item.note || '',
-      note: item.notes || item.note || '',
     }));
 
     const strapiItemsComponent = selectedItems.map((item: any) => {
@@ -82,15 +73,12 @@ export default function KeranjangPage() {
       const numMenuId = Number(rawMenuId);
 
       return {
-        name: String(item.name || item.nama || 'Makanan'),
-        price: Number(item.price || item.harga || 0),
-        quantity: Number(item.quantity || item.qty || 1),
+        quantity: Number(item.quantity || 1),
         notes: String(item.notes || item.note || ''),
         menu: isNaN(numMenuId) ? rawMenuId : numMenuId,
       };
     });
 
-    // 5. Payload Strapi
     const strapiPayload = {
       data: {
         order_id: generatedOrderId,
@@ -105,29 +93,20 @@ export default function KeranjangPage() {
       },
     };
 
-    // 6. Data Pesanan Lokal
     const pesananLokal = {
       orderId: generatedOrderId,
       order_id: generatedOrderId,
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
       status: 'Menunggu Konfirmasi',
       menu_status: 'pending',
       customer_name: namaPelanggan,
       items: localItems,
       totalPrice: totalHarga,
-      total_price: totalHarga,
       pickupDate: pickupDate,
       pickupTime: pickupTime,
       paymentMethod: paymentMethod,
     };
 
-    // Simpan ke LocalStorage
-    const dataLama = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
-    dataLama.unshift(pesananLokal);
-    localStorage.setItem('smart_canteen_orders', JSON.stringify(dataLama));
-
-    // 7. Kirim ke Strapi Backend (jika online)
     try {
       const response = await fetch(`${STRAPI_URL}/api/orders`, {
         method: 'POST',
@@ -141,23 +120,36 @@ export default function KeranjangPage() {
 
       if (response.ok) {
         console.log('✅ Pesanan berhasil tersimpan di Strapi:', resJson);
+
+        // 💡 SIMPAN ORDER ID AKTIF AGAR USER TIDAK MELIHAT PESANAN ORANG LAIN
+        localStorage.setItem('active_order_id', generatedOrderId);
+
+        const dataLama = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
+        dataLama.unshift(pesananLokal);
+        localStorage.setItem('smart_canteen_orders', JSON.stringify(dataLama));
+
+        clearSelectedItems();
+        router.push('/status-pesanan');
       } else {
-        console.warn('⚠️ Strapi menolak format data, pesanan tetap tersimpan di lokal:', resJson);
+        console.error('❌ Error Detail dari Strapi:', resJson);
+        const details = resJson?.error?.details?.errors;
+        let detailMessage = '';
+        if (Array.isArray(details)) {
+          detailMessage = details.map((e: any) => `- ${e.path ? e.path.join('.') : 'field'}: ${e.message}`).join('\n');
+        }
+        alert(`Gagal menyimpan ke database Strapi!\n\n${detailMessage || resJson?.error?.message}`);
       }
     } catch (err) {
-      console.warn('⚠️ Server Strapi offline, pesanan tersimpan lokal:', err);
+      console.warn('⚠️ Server Strapi offline:', err);
+      alert('Tidak dapat terhubung ke server Strapi.');
     } finally {
-      clearSelectedItems();
       setLoading(false);
-      router.push('/status-pesanan');
     }
   };
 
   return (
     <div className="w-full min-h-screen bg-white font-sans text-gray-900 flex flex-col justify-between">
       <div className="w-full py-6 px-4 sm:px-8 space-y-6 pb-28">
-        
-        {/* HEADER */}
         <div className="flex items-center justify-between pb-4 border-b border-gray-100">
           <button onClick={() => router.back()} className="text-gray-900 hover:text-orange-500 transition-colors p-1 -ml-1 cursor-pointer">
             <ArrowLeft size={26} />
@@ -185,7 +177,6 @@ export default function KeranjangPage() {
               <span className="text-xs sm:text-sm text-gray-400">{selectedItems.length} Terpilih</span>
             </div>
 
-            {/* DAFTAR ITEM */}
             <div className="bg-white border border-gray-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-5">
               {cartItems.map((item) => {
                 const isChecked = item.selected ?? true;
@@ -217,7 +208,6 @@ export default function KeranjangPage() {
                       </div>
                     </div>
 
-                    {/* MENAMPILKAN CATATAN JIKA ADA */}
                     {itemNote && (
                       <div className="ml-8 sm:ml-10 flex items-center gap-1.5 text-xs sm:text-sm text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100 w-fit">
                         <FileText size={14} className="text-gray-400 shrink-0" />

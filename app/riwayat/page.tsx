@@ -97,21 +97,17 @@ export default function RiwayatPage() {
         });
 
         if (strapiOrders.length > 0) {
-          const mapById = new Map<string, OrderData>();
-          strapiOrders.forEach(o => mapById.set(String(o.orderId), o));
-          orders.forEach(o => mapById.set(String(o.orderId), o));
-          orders = Array.from(mapById.values());
+          orders = strapiOrders;
         }
       }
     } catch (err) {
       console.warn('Backend Strapi offline, menggunakan data riwayat dari LocalStorage.');
     }
 
-    // Filter hanya yang berstatus Selesai, Dibatalkan, atau Siap Diambil
-    const filtered = orders.filter((o) => {
-      const st = String(o.status || '').toLowerCase();
-      return st.includes('selesai') || st.includes('batal') || st.includes('siap');
-    });
+    // Filter hanya yang berstatus Selesai atau Dibatalkan
+    const filtered = orders.filter((o) =>
+      ['selesai', 'dibatalkan', 'Selesai', 'Dibatalkan', 'siap_diambil', 'siap diambil'].includes(o.status || '')
+    );
 
     setHistoryOrders(filtered);
     setLoading(false);

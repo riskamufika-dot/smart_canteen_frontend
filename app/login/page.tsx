@@ -18,6 +18,19 @@ export default function AuthPage() {
 
   const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
 
+  // Fungsi pembantu untuk mengarahkan halaman berdasarkan Role
+  const redirectByUserRole = (userData: any) => {
+    // Memeriksa nama role dari response Strapi (case-insensitive)
+    const roleName = userData?.role?.name?.toLowerCase() || '';
+
+    if (roleName.includes('penjual') || roleName.includes('seller') || roleName.includes('merchant')) {
+      router.push('/dashboard-penjual');
+    } else {
+      // Default untuk pelanggan / siswa
+      router.push('/home');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -43,7 +56,8 @@ export default function AuthPage() {
         setIsSignUp(false);
       } else {
         // --- PROSES LOGIN ---
-        const res = await fetch(`${STRAPI_URL}/api/auth/local`, {
+        // Penambahan ?populate=role agar Strapi menyertakan object role di data.user
+        const res = await fetch(`${STRAPI_URL}/api/auth/local?populate=role`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -55,12 +69,14 @@ export default function AuthPage() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error?.message || 'Email atau password salah.');
 
-        // Simpan JWT token ke localStorage
+        // Simpan JWT token & user ke localStorage
         localStorage.setItem('token', data.jwt);
         localStorage.setItem('user', JSON.stringify(data.user));
 
         alert('Login berhasil!');
-        router.push('/home');
+        
+        // Arahkan user sesuai dengan rolenya
+        redirectByUserRole(data.user);
       }
     } catch (err: any) {
       setErrorMsg(err.message);

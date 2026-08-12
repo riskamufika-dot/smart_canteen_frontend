@@ -59,7 +59,6 @@ interface MenuItem {
 export default function KelolaMenuPage() {
   const [menus, setMenus] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // State Modal (Tambah/Edit)
   const [isModalOpen, setIsModalOpen] = useState(false);

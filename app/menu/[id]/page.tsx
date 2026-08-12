@@ -216,6 +216,7 @@ export default function DetailMenuPage() {
           <Link href="/home" className="hover:text-orange-500 transition-colors">
             <Home size={24} className="stroke-[2]" />
           </Link>
+
           <Link href="/keranjang" className="relative hover:text-orange-500 transition-colors">
             <ShoppingCart size={24} className="stroke-[2]" />
             {totalItems > 0 && (
