@@ -118,7 +118,26 @@ export default function StatusPesananPage() {
               normStatus = 'Siap Diambil';
             } else if (rawStatus.includes('selesai')) {
               normStatus = 'Selesai';
+            } else if (rawStatus.includes('batal')) {
+              normStatus = 'Dibatalkan';
             }
+
+            // Sinkronkan dengan update status terbaru dari LocalStorage jika ada
+            try {
+              const savedOrders = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
+              const targetCleanId = String(attr.order_id || attr.orderId || `#SC-${raw.id}`).replace('#', '').trim();
+              const localMatch = savedOrders.find((o: any) => {
+                const oId = String(o.orderId || o.order_id || o.id || '').replace('#', '').trim();
+                return oId === targetCleanId;
+              });
+              if (localMatch && (localMatch.status || localMatch.menu_status)) {
+                const localStatusStr = String(localMatch.status || localMatch.menu_status).toLowerCase();
+                if (localStatusStr.includes('disiapkan')) normStatus = 'Sedang Disiapkan';
+                else if (localStatusStr.includes('siap')) normStatus = 'Siap Diambil';
+                else if (localStatusStr.includes('selesai')) normStatus = 'Selesai';
+                else if (localStatusStr.includes('batal')) normStatus = 'Dibatalkan';
+              }
+            } catch (err) {}
 
             latestData = {
               id: raw.id,
@@ -155,6 +174,8 @@ export default function StatusPesananPage() {
               normStatus = 'Siap Diambil';
             } else if (rawStatus.includes('selesai')) {
               normStatus = 'Selesai';
+            } else if (rawStatus.includes('batal')) {
+              normStatus = 'Dibatalkan';
             }
 
             const calculatedTotal = parsedItems.reduce(
@@ -363,6 +384,20 @@ export default function StatusPesananPage() {
               className="px-6 py-2.5 bg-[#52C453] hover:bg-green-600 text-white font-bold text-sm rounded-xl transition-all cursor-pointer shadow-sm"
             >
               Lihat Riwayat Pesanan
+            </button>
+          </div>
+        )}
+
+        {order.status === 'Dibatalkan' && (
+          <div className="bg-red-50 border border-red-200 rounded-2xl p-4 text-center space-y-3 animate-in fade-in duration-300">
+            <p className="text-sm text-red-800 font-bold">
+              ❌ Pesanan ini telah dibatalkan oleh penjual.
+            </p>
+            <button
+              onClick={() => router.push('/home')}
+              className="px-6 py-2.5 bg-red-500 hover:bg-red-600 text-white font-bold text-sm rounded-xl transition-all cursor-pointer shadow-sm"
+            >
+              Kembali ke Beranda
             </button>
           </div>
         )}

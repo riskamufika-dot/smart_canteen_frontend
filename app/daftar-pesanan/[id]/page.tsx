@@ -17,7 +17,7 @@ import {
 const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
 const CLEAN_STRAPI_URL = STRAPI_URL.replace(/\/$/, '');
 
-type StatusType = 'Menunggu Konfirmasi' | 'Sedang Disiapkan' | 'Siap Diambil' | 'Selesai';
+type StatusType = 'Menunggu Konfirmasi' | 'Sedang Disiapkan' | 'Siap Diambil' | 'Selesai' | 'Dibatalkan';
 
 interface OrderItem {
   id?: number | string;
@@ -406,7 +406,8 @@ export default function DetailPesananPage() {
     const strapiSlugStatus = 
       newStatus === 'Sedang Disiapkan' ? 'sedang_disiapkan' : 
       newStatus === 'Siap Diambil' ? 'siap_diambil' : 
-      newStatus === 'Selesai' ? 'selesai' : 'menunggu_konfirmasi';
+      newStatus === 'Selesai' ? 'selesai' : 
+      newStatus === 'Dibatalkan' ? 'dibatalkan' : 'menunggu_konfirmasi';
 
     const targetEndpoint = order.documentId 
       ? `${STRAPI_URL}/api/orders/${order.documentId}`
@@ -459,7 +460,7 @@ export default function DetailPesananPage() {
 
   const handleBatalkanPesanan = () => {
     if (confirm('Apakah Anda yakin ingin membatalkan/menolak pesanan ini?')) {
-      updateOrderStatus('Menunggu Konfirmasi');
+      updateOrderStatus('Dibatalkan');
       alert('Pesanan telah dibatalkan.');
     }
   };

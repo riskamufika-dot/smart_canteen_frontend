@@ -24,12 +24,12 @@ export default function DaftarPesananPage() {
   const [loading, setLoading] = useState(true);
 
   const fetchOrders = useCallback(async () => {
-    let allOrders: Order[] = [];
+    let localFormatted: Order[] = [];
 
     // 1. Ambil Data Lokal sebagai basis / fallback
     try {
       const localData = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
-      allOrders = localData.map((data: any, idx: number) => {
+      localFormatted = localData.map((data: any, idx: number) => {
         const attr = data.data || data;
         const rawDate = attr.createdAt ? new Date(attr.createdAt) : new Date();
         const orderTime = rawDate.toLocaleTimeString('id-ID', {
@@ -43,6 +43,7 @@ export default function DaftarPesananPage() {
         if (rawStatus.toLowerCase().includes('disiapkan') || rawStatus === 'sedang_disiapkan') displayStatus = 'Sedang Disiapkan';
         else if (rawStatus.toLowerCase().includes('siap') || rawStatus === 'siap_diambil') displayStatus = 'Siap Diambil';
         else if (rawStatus.toLowerCase().includes('selesai')) displayStatus = 'Selesai';
+        else if (rawStatus.toLowerCase().includes('batal')) displayStatus = 'Dibatalkan';
 
         const fullOrderId = attr.orderId || attr.order_id || `#SC-${attr.id || idx + 1}`;
         const cleanOrderId = String(fullOrderId).replace('#', '').trim();
@@ -62,17 +63,18 @@ export default function DaftarPesananPage() {
       console.warn('Gagal membaca LocalStorage pesanan:', err);
     }
 
+    let strapiFormatted: Order[] = [];
     // 2. Ambil dari Strapi Backend jika online
     try {
       const res = await fetch(`${STRAPI_URL}/api/orders?populate=*&sort[0]=createdAt:desc`, {
         cache: 'no-store'
-      });
+      }).catch(() => null);
       
-      if (res.ok) {
+      if (res && res.ok) {
         const json = await res.json();
         const dataList = json.data || [];
 
-        const strapiFormatted: Order[] = dataList.map((item: any) => {
+        strapiFormatted = dataList.map((item: any) => {
           const attr = item.attributes ? { ...item.attributes, id: item.id, documentId: item.documentId } : item;
           const userObj = attr.users_permissions_user?.data?.attributes || attr.users_permissions_user || attr.user || {};
 
@@ -88,6 +90,7 @@ export default function DaftarPesananPage() {
           if (rawStatus.toLowerCase().includes('disiapkan') || rawStatus === 'sedang_disiapkan') displayStatus = 'Sedang Disiapkan';
           else if (rawStatus.toLowerCase().includes('siap') || rawStatus === 'siap_diambil') displayStatus = 'Siap Diambil';
           else if (rawStatus.toLowerCase().includes('selesai')) displayStatus = 'Selesai';
+          else if (rawStatus.toLowerCase().includes('batal')) displayStatus = 'Dibatalkan';
 
           const fullOrderId = attr.order_id || attr.orderId || `#SC-${item.id}`;
           const cleanOrderId = String(fullOrderId).replace('#', '').trim();
@@ -103,17 +106,19 @@ export default function DaftarPesananPage() {
             status: displayStatus,
           };
         });
-
-        if (strapiFormatted.length > 0) {
-          allOrders = strapiFormatted;
-        }
       }
     } catch (e) {
       console.warn('Gagal koneksi ke Strapi, menggunakan data pesanan lokal:', e);
-    } finally {
-      setOrders(allOrders);
-      setLoading(false);
     }
+
+    // Merge Strapi & Local (Utamakan data lokal yang memiliki update status paling mutakhir)
+    const mapByOrderId = new Map<string, Order>();
+    strapiFormatted.forEach(o => mapByOrderId.set(o.rawOrderId, o));
+    localFormatted.forEach(o => mapByOrderId.set(o.rawOrderId, o));
+
+    const mergedOrders = Array.from(mapByOrderId.values());
+    setOrders(mergedOrders);
+    setLoading(false);
   }, []);
 
   useEffect(() => {
