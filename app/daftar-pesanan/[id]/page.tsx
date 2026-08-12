@@ -104,6 +104,8 @@ export default function DetailPesananPage() {
           const mAttr = m.attributes || m;
           return String(m.id) === String(itemId) || String(mAttr.name || mAttr.nama || '').toLowerCase() === String(name || '').toLowerCase();
         });
+        // console.log({ allStrapiMenus, attrData })
+        // console.log({ itemId })
 
         if (matched) {
           const mAttr = matched.attributes || matched;
@@ -114,8 +116,8 @@ export default function DetailPesananPage() {
       }
 
       return {
-        id: itemId || Math.random(),
-        name: name || 'Makanan Kantin',
+        id: itemId,
+        name: name,
         price: price,
         quantity: quantity,
         image: getImageUrl(rawImg),
@@ -134,9 +136,14 @@ export default function DetailPesananPage() {
     const cleanNoHash = cleanParam.replace('#', '').trim();
 
     try {
+      const query: Record<string, string> = {
+        populate: '*',
+        'pagination[pageSize]': '10000'
+      }
+      const queryString = new URLSearchParams(query).toString()
       const [resOrders, resMenus] = await Promise.all([
         fetch(`${STRAPI_URL}/api/orders?populate=*`, { cache: 'no-store' }),
-        fetch(`${STRAPI_URL}/api/menus?populate=*&pagination[pageSize]=1000`).catch(() => null)
+        fetch(`${STRAPI_URL}/api/menus?${queryString}`).catch(() => null)
       ]);
 
       if (resMenus && resMenus.ok) {
@@ -168,8 +175,6 @@ export default function DetailPesananPage() {
     const activeData = strapiMatchData
       ? (strapiMatchData.attributes ? { ...strapiMatchData.attributes, id: strapiMatchData.id } : strapiMatchData)
       : null;
-
-    console.log({ activeData })
 
     if (activeData) {
       const userObj = activeData.users_permissions_user?.data?.attributes ||

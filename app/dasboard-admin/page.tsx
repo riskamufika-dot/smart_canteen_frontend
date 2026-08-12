@@ -70,7 +70,7 @@ export default function DashboardAdmin() {
   const fetchOrdersFromStrapi = async (isBackgroundFetch = false) => {
     if (!isBackgroundFetch) setLoading(true);
     try {
-      const res = await fetch(`${STRAPI_URL}/api/orders?sort[0]=createdAt:desc&populate[items][populate]=*`);
+      const res = await fetch(`${STRAPI_URL}/api/orders?sort[0]=createdAt:desc&populate[items][populate][menu]=*`);
 
       if (res.ok) {
         const result = await res.json();

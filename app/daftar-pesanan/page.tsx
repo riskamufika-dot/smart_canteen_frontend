@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Search, ChevronRight, Loader2, Inbox } from 'lucide-react';
+import Link from 'next/link';
 
 const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
 
@@ -100,18 +101,15 @@ export default function DaftarPesananPage() {
     <div className="min-h-screen w-full bg-white font-sans flex flex-col p-4 sm:p-6 text-slate-800">
       
       {/* HEADER TOPBAR */}
-      <div className="flex items-center gap-4 mb-6">
-        <button 
-          onClick={() => router.back()}
-          className="p-1 text-slate-800 hover:text-slate-600 transition-colors cursor-pointer flex items-center justify-center"
-          title="Kembali"
-        >
-          <ArrowLeft size={24} strokeWidth={2.5} />
-        </button>
-        <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-          Daftar Pesanan
-        </h1>
-      </div>
+      <div className="flex items-center gap-4 mb-8">
+          <Link 
+            href="/dasboard-admin" 
+            className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-700"
+          >
+            <ArrowLeft size={24} />
+          </Link>
+          <h1 className="text-2xl font-bold text-slate-900">Daftar Pesanan</h1>
+        </div>
 
       {/* SEARCH BAR */}
       <div className="w-full max-w-md mb-6 relative">
