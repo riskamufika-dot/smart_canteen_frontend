@@ -2,14 +2,14 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { 
-  ArrowLeft, 
-  Clock, 
-  User, 
-  Utensils, 
-  FileText, 
-  ShoppingBag, 
-  X, 
+import {
+  ArrowLeft,
+  Clock,
+  User,
+  Utensils,
+  FileText,
+  ShoppingBag,
+  X,
   Check,
   ImageIcon
 } from 'lucide-react';
@@ -28,14 +28,14 @@ interface OrderItem {
 }
 
 interface OrderDetail {
+  documentId?: number
   id: number | string;
-  documentId?: string;
   orderId: string;
   createdAt: string;
-  orderTime: string;      
-  orderDate: string;      
-  pickupTime: string;     
-  pickupDate: string;     
+  orderTime: string;
+  orderDate: string;
+  pickupTime: string;
+  pickupDate: string;
   paymentMethod: string;
   customerName: string;
   customerClass: string;
@@ -63,168 +63,118 @@ export default function DetailPesananPage() {
   const [showErrorModal, setShowErrorModal] = useState<boolean>(false);
   const [showSuccessModal, setShowSuccessModal] = useState<boolean>(false);
 
-  // Helper Ambil URL Gambar Lengkap dari Strapi
   const getImageUrl = (imageAttr: any): string | null => {
     if (!imageAttr) return null;
-
     if (typeof imageAttr === 'string') {
       if (imageAttr.startsWith('http://') || imageAttr.startsWith('https://')) return imageAttr;
       return `${STRAPI_URL}${imageAttr.startsWith('/') ? '' : '/'}${imageAttr}`;
     }
-
-    if (Array.isArray(imageAttr) && imageAttr.length > 0) {
-      return getImageUrl(imageAttr[0]);
-    }
-
-    const imgObj = imageAttr.data?.attributes || imageAttr.data || imageAttr.attributes || imageAttr;
-    const url = 
-      imgObj?.formats?.medium?.url || 
-      imgObj?.formats?.small?.url || 
-      imgObj?.formats?.thumbnail?.url || 
-      imgObj?.url;
-
+    const imgObj = imageAttr.data?.attributes || imageAttr.data || imageAttr;
+    const url = imgObj?.formats?.medium?.url || imgObj?.formats?.small?.url || imgObj?.url;
     if (url) {
       if (url.startsWith('http://') || url.startsWith('https://')) return url;
       return `${STRAPI_URL}${url.startsWith('/') ? '' : '/'}${url}`;
     }
-
     return null;
   };
 
-  // Parsing Items & Pencocokan Otomatis dengan Master Menu Strapi
   const parseItems = (attrData: any, allStrapiMenus: any[] = []): OrderItem[] => {
-    let rawItems = attrData?.items || attrData?.order_items || attrData?.menu_items || attrData?.details || [];
+    let rawItems = attrData?.items || attrData?.order_items || attrData?.details || [];
 
     if (typeof rawItems === 'string') {
       try { rawItems = JSON.parse(rawItems); } catch (e) { rawItems = []; }
-    }
-
-    if (rawItems && !Array.isArray(rawItems) && Array.isArray(rawItems.data)) {
-      rawItems = rawItems.data;
     }
 
     if (!Array.isArray(rawItems)) return [];
 
     return rawItems.map((it: any) => {
       const itemAttr = it.attributes || it;
-      const menuRel = itemAttr.menu?.data?.attributes || 
-                      itemAttr.menu?.data || 
-                      itemAttr.menu?.attributes || 
-                      itemAttr.menu || 
-                      {};
+      const menuRel = itemAttr.menu?.data?.attributes || itemAttr.menu?.data || itemAttr.menu || {};
 
-      let name = itemAttr.name || 
-                 itemAttr.nama || 
-                 itemAttr.nama_makanan || 
-                 itemAttr.title ||
-                 menuRel.name || 
-                 menuRel.nama;
+      let name = menuRel.name || menuRel.nama || itemAttr.name || itemAttr.nama;
+      let price = Number(menuRel.price || menuRel.harga || itemAttr.price || itemAttr.harga || 0);
+      const quantity = Number(itemAttr.quantity || itemAttr.qty || 1);
+      let rawImg = menuRel.image || menuRel.gambar || itemAttr.image || itemAttr.gambar;
 
-      let price = Number(
-        itemAttr.price || 
-        itemAttr.harga || 
-        itemAttr.subtotal ||
-        menuRel.price || 
-        menuRel.harga || 
-        0
-      );
+      const itemId = itemAttr.id || menuRel.id || itemAttr.menu_id;
 
-      const quantity = Number(
-        itemAttr.quantity || 
-        itemAttr.qty || 
-        itemAttr.jumlah || 
-        1
-      );
-
-      let rawImg = menuRel.image || menuRel.gambar || menuRel.foto || itemAttr.image || itemAttr.gambar || itemAttr.foto;
-
-      // 💡 FALLBACK AUTO-MATCH: Jika data nama/harga kosong, cari ke API Master Menu
-      const itemId = itemAttr.id || itemAttr.menu_id || itemAttr.menuId || menuRel.id || itemAttr.documentId;
-      
+      // Deep Matching ke Master Menu
       if (allStrapiMenus.length > 0) {
-        const matchedMenu = allStrapiMenus.find((m: any) => {
+        const matched = allStrapiMenus.find((m: any) => {
           const mAttr = m.attributes || m;
-          const mName = mAttr.name || mAttr.nama || '';
-          return (
-            (itemId && String(m.id) === String(itemId)) ||
-            (itemId && String(m.documentId) === String(itemId)) ||
-            (name && mName.toLowerCase().trim() === String(name).toLowerCase().trim())
-          );
+          return String(m.id) === String(itemId) || String(mAttr.name || mAttr.nama || '').toLowerCase() === String(name || '').toLowerCase();
         });
 
-        if (matchedMenu) {
-          const mAttr = matchedMenu.attributes || matchedMenu;
-          if (!name || name === 'Menu Makanan') name = mAttr.name || mAttr.nama;
+        if (matched) {
+          const mAttr = matched.attributes || matched;
+          if (!name || name === 'Makanan') name = mAttr.name || mAttr.nama;
           if (price === 0) price = Number(mAttr.price || mAttr.harga || 0);
-          if (!rawImg) rawImg = mAttr.image || mAttr.gambar || mAttr.foto;
+          if (!rawImg) rawImg = mAttr.image || mAttr.gambar;
         }
       }
 
       return {
         id: itemId || Math.random(),
-        name: name || 'Menu Makanan',
+        name: name || 'Makanan Kantin',
         price: price,
         quantity: quantity,
         image: getImageUrl(rawImg),
-        notes: itemAttr.notes || itemAttr.catatan || itemAttr.note || '',
+        notes: itemAttr.notes || itemAttr.note || itemAttr.catatan || '',
       };
     });
   };
 
-  // Fetch Detail Pesanan
   const fetchOrderDetail = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoading(true);
     let foundOrder: OrderDetail | null = null;
     let strapiMatchData: any = null;
     let allStrapiMenus: any[] = [];
 
-    try {
-      const cleanParam = rawParam.trim();
-      const numOnlyParam = cleanParam.replace(/[^0-9]/g, '');
+    const cleanParam = rawParam.trim();
+    const cleanNoHash = cleanParam.replace('#', '').trim();
 
-      // Ambil data orders & master menus
-      const [resList, resMenus] = await Promise.all([
-        fetch(`${STRAPI_URL}/api/orders?populate=*&status=draft&pagination[pageSize]=1000&sort[0]=createdAt:desc`, { cache: 'no-store' }),
-        fetch(`${STRAPI_URL}/api/menus?populate=*&status=draft&pagination[pageSize]=1000`).catch(() => null)
+    try {
+      const [resOrders, resMenus] = await Promise.all([
+        fetch(`${STRAPI_URL}/api/orders?populate=*`, { cache: 'no-store' }),
+        fetch(`${STRAPI_URL}/api/menus?populate=*&pagination[pageSize]=1000`).catch(() => null)
       ]);
-      
+
       if (resMenus && resMenus.ok) {
         const jsonMenus = await resMenus.json();
         allStrapiMenus = jsonMenus.data || [];
       }
 
-      if (resList.ok) {
-        const jsonList = await resList.json();
-        const dataList = jsonList.data || [];
-        
+      if (resOrders.ok) {
+        const jsonOrders = await resOrders.json();
+        const dataList = jsonOrders.data || [];
+
         strapiMatchData = dataList.find((data: any) => {
-          const attr = data.attributes ? { ...data.attributes, id: data.id, documentId: data.documentId } : data;
-          const itemOrderId = String(attr.order_id || attr.orderId || `#SC-${data.id}`);
-          const cleanOrderId = itemOrderId.replace('#', '').trim();
+          const attr = data.attributes ? { ...data.attributes, id: data.id } : data;
+          const idNum = String(data.id || attr.id || '');
+          const orderIdStr = String(attr.order_id || attr.orderId || '');
+          const cleanOrderId = orderIdStr.replace('#', '').trim();
 
           return (
-            String(data.documentId) === cleanParam ||
-            String(data.id) === cleanParam ||
-            itemOrderId === cleanParam ||
-            cleanOrderId === cleanParam ||
-            (numOnlyParam && String(data.id) === numOnlyParam)
+            idNum === cleanParam ||
+            orderIdStr === cleanParam ||
+            cleanOrderId === cleanNoHash
           );
         });
       }
     } catch (e) {
-      console.error('Gagal mengambil detail pesanan:', e);
+      console.error('Error fetch detail:', e);
     }
 
-    const activeData = strapiMatchData 
-      ? (strapiMatchData.attributes ? { ...strapiMatchData.attributes, id: strapiMatchData.id, documentId: strapiMatchData.documentId } : strapiMatchData) 
+    const activeData = strapiMatchData
+      ? (strapiMatchData.attributes ? { ...strapiMatchData.attributes, id: strapiMatchData.id } : strapiMatchData)
       : null;
 
+    console.log({ activeData })
+
     if (activeData) {
-      const userObj = activeData.users_permissions_user?.data?.attributes || 
-                      activeData.users_permissions_user?.data ||
-                      activeData.users_permissions_user || 
-                      activeData.user?.data?.attributes || 
-                      activeData.user || {};
+      const userObj = activeData.users_permissions_user?.data?.attributes ||
+        activeData.users_permissions_user?.data ||
+        activeData.users_permissions_user || {};
 
       const rawDate = activeData.createdAt ? new Date(activeData.createdAt) : new Date();
       const formattedOrderTime = rawDate.toLocaleTimeString('id-ID', {
@@ -241,8 +191,7 @@ export default function DetailPesananPage() {
 
       const userPickupTime = activeData.pickup_time || activeData.pickupTime || formattedOrderTime;
 
-      // Status Pesanan
-      const rawStatus = String(activeData.status_pesanan || activeData.menu_status || activeData.status || activeData.order_status || '').toLowerCase();
+      const rawStatus = String(activeData.menu_status || activeData.status_pesanan || activeData.status || '').toLowerCase();
       let normStatus: StatusType = 'Menunggu Konfirmasi';
 
       if (rawStatus.includes('disiapkan') || rawStatus === 'sedang_disiapkan') {
@@ -259,37 +208,21 @@ export default function DetailPesananPage() {
       const calculatedTotal = parsedList.reduce((acc, it) => acc + (Number(it.price || 0) * Number(it.quantity || 1)), 0);
 
       let userNotes: string[] = parsedList.map(i => i.notes).filter(Boolean) as string[];
-      if (userNotes.length === 0) {
-        if (activeData.catatan) userNotes = Array.isArray(activeData.catatan) ? activeData.catatan : [String(activeData.catatan)];
-        else if (activeData.notes) userNotes = Array.isArray(activeData.notes) ? activeData.notes : [String(activeData.notes)];
-      }
 
-      const finalTotalPrice = Number(activeData.total_price || activeData.totalPrice || activeData.total) || calculatedTotal;
-
-      const customerName = activeData.customer_name || 
-                           activeData.nama_siswa || 
-                           activeData.nama_pemesan || 
-                           userObj.username || 
-                           userObj.nama || 
-                           'Siswa Pelanggan';
-
-      const customerClass = activeData.kelas || 
-                            activeData.customer_class || 
-                            userObj.kelas || 
-                            '-';
+      const finalTotalPrice = Number(activeData.total_price || activeData.totalPrice) || calculatedTotal;
 
       foundOrder = {
-        id: activeData.id || rawParam,
         documentId: activeData.documentId,
-        orderId: activeData.order_id || activeData.orderId || `#SC-${activeData.id || rawParam}`,
+        id: activeData.id || cleanParam,
+        orderId: activeData.order_id || activeData.orderId || `#SC-${activeData.id}`,
         createdAt: activeData.createdAt || new Date().toISOString(),
         orderTime: formattedOrderTime,
         orderDate: formattedOrderDate,
         pickupTime: userPickupTime,
         pickupDate: formattedOrderDate,
-        paymentMethod: activeData.payment_method === 'cash' ? 'Bayar di Kantin' : (activeData.payment_method || 'Bayar di Kantin'),
-        customerName: customerName,
-        customerClass: customerClass,
+        paymentMethod: String(activeData.payment_method || 'CASH').toUpperCase() === 'CASH' ? 'Bayar di Kantin' : (activeData.payment_method || 'Bayar di Kantin'),
+        customerName: activeData.customer_name || userObj.username || userObj.nama || 'Siswa Pelanggan',
+        customerClass: activeData.kelas || userObj.kelas || '-',
         items: parsedList,
         notes: userNotes,
         totalPrice: finalTotalPrice,
@@ -302,6 +235,8 @@ export default function DetailPesananPage() {
           selesai: normStatus === 'Selesai' ? `${formattedOrderDate} ${userPickupTime}` : undefined,
         }
       };
+
+      console.log({ foundOrder })
     }
 
     setOrder(foundOrder);
@@ -318,44 +253,23 @@ export default function DetailPesananPage() {
     return () => clearInterval(interval);
   }, [fetchOrderDetail]);
 
-  // Update Status Pesanan ke Strapi
   const updateOrderStatus = async (newStatus: StatusType) => {
     if (!order) return;
 
-    const currentTimeStr = `${order.orderDate} ${new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }).replace('.', ':')} WIB`;
+    console.log({ order })
 
-    const updatedOrder: OrderDetail = {
-      ...order,
-      status: newStatus,
-      historyTime: {
-        ...order.historyTime,
-        ...(newStatus === 'Sedang Disiapkan' && { disiapkan: currentTimeStr }),
-        ...(newStatus === 'Siap Diambil' && { siap: currentTimeStr }),
-        ...(newStatus === 'Selesai' && { selesai: currentTimeStr }),
-      }
-    };
-
-    setOrder(updatedOrder);
-
-    const strapiSlugStatus = 
-      newStatus === 'Sedang Disiapkan' ? 'sedang_disiapkan' : 
-      newStatus === 'Siap Diambil' ? 'siap_diambil' : 
-      newStatus === 'Selesai' ? 'selesai' : 'menunggu_konfirmasi';
-
-    const targetEndpoint = order.documentId 
-      ? `${STRAPI_URL}/api/orders/${order.documentId}`
-      : `${STRAPI_URL}/api/orders/${order.id}`;
+    const strapiSlugStatus =
+      newStatus === 'Sedang Disiapkan' ? 'sedang_disiapkan' :
+        newStatus === 'Siap Diambil' ? 'siap_diambil' :
+          newStatus === 'Selesai' ? 'selesai' : 'pending';
 
     try {
-      await fetch(targetEndpoint, {
+      await fetch(`${STRAPI_URL}/api/orders/${order.documentId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           data: {
-            status_pesanan: newStatus,
             menu_status: strapiSlugStatus,
-            status: newStatus,
-            order_status: newStatus,
           }
         }),
       });
@@ -508,9 +422,9 @@ export default function DetailPesananPage() {
                           <div className="flex items-center gap-4">
                             <div className="w-14 h-14 rounded-2xl bg-gray-100 overflow-hidden border border-gray-200 shrink-0 flex items-center justify-center">
                               {item.image ? (
-                                <img 
-                                  src={item.image} 
-                                  alt={item.name} 
+                                <img
+                                  src={item.image}
+                                  alt={item.name}
                                   className="w-full h-full object-cover"
                                 />
                               ) : (
@@ -613,11 +527,10 @@ export default function DetailPesananPage() {
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-2 relative">
             <div className="flex flex-col items-center gap-1.5 z-10 text-center">
-              <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 flex items-center justify-center transition-all ${
-                order.status === 'Menunggu Konfirmasi'
-                  ? 'bg-[#E07A2F] border-[#E07A2F] text-white shadow-md'
-                  : 'bg-white border-gray-300 text-gray-700'
-              }`}>
+              <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 flex items-center justify-center transition-all ${order.status === 'Menunggu Konfirmasi'
+                ? 'bg-[#E07A2F] border-[#E07A2F] text-white shadow-md'
+                : 'bg-white border-gray-300 text-gray-700'
+                }`}>
                 <Clock className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
               <span className={`text-xs sm:text-sm font-bold ${order.status === 'Menunggu Konfirmasi' ? 'text-[#E07A2F]' : 'text-gray-600'}`}>
@@ -629,11 +542,10 @@ export default function DetailPesananPage() {
             </div>
 
             <div className="flex flex-col items-center gap-1.5 z-10 text-center">
-              <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 flex items-center justify-center transition-all ${
-                order.status === 'Sedang Disiapkan'
-                  ? 'bg-[#E07A2F] border-[#E07A2F] text-white shadow-md'
-                  : 'bg-white border-gray-300 text-gray-700'
-              }`}>
+              <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 flex items-center justify-center transition-all ${order.status === 'Sedang Disiapkan'
+                ? 'bg-[#E07A2F] border-[#E07A2F] text-white shadow-md'
+                : 'bg-white border-gray-300 text-gray-700'
+                }`}>
                 <Utensils className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
               <span className={`text-xs sm:text-sm font-bold ${order.status === 'Sedang Disiapkan' ? 'text-[#E07A2F]' : 'text-gray-600'}`}>
@@ -645,11 +557,10 @@ export default function DetailPesananPage() {
             </div>
 
             <div className="flex flex-col items-center gap-1.5 z-10 text-center">
-              <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 flex items-center justify-center transition-all ${
-                order.status === 'Siap Diambil'
-                  ? 'bg-[#22AD5C] border-[#22AD5C] text-white shadow-md'
-                  : 'bg-white border-gray-300 text-gray-700'
-              }`}>
+              <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 flex items-center justify-center transition-all ${order.status === 'Siap Diambil'
+                ? 'bg-[#22AD5C] border-[#22AD5C] text-white shadow-md'
+                : 'bg-white border-gray-300 text-gray-700'
+                }`}>
                 <ShoppingBag className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
               <span className={`text-xs sm:text-sm font-bold ${order.status === 'Siap Diambil' ? 'text-[#22AD5C]' : 'text-gray-600'}`}>
@@ -661,11 +572,10 @@ export default function DetailPesananPage() {
             </div>
 
             <div className="flex flex-col items-center gap-1.5 z-10 text-center">
-              <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 flex items-center justify-center transition-all ${
-                order.status === 'Selesai'
-                  ? 'bg-[#22AD5C] border-[#22AD5C] text-white shadow-md'
-                  : 'bg-white border-gray-300 text-gray-700'
-              }`}>
+              <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 flex items-center justify-center transition-all ${order.status === 'Selesai'
+                ? 'bg-[#22AD5C] border-[#22AD5C] text-white shadow-md'
+                : 'bg-white border-gray-300 text-gray-700'
+                }`}>
                 <Check className="w-5 h-5 sm:w-6 sm:h-6 stroke-[3]" />
               </div>
               <span className={`text-xs sm:text-sm font-bold ${order.status === 'Selesai' ? 'text-[#22AD5C]' : 'text-gray-600'}`}>
@@ -689,11 +599,10 @@ export default function DetailPesananPage() {
             <button
               onClick={handleKonfirmasiPesanan}
               disabled={order.status !== 'Menunggu Konfirmasi'}
-              className={`w-full py-3 sm:py-3.5 px-4 rounded-xl sm:rounded-2xl font-bold transition-all text-center text-sm sm:text-base cursor-pointer active:scale-98 ${
-                order.status === 'Menunggu Konfirmasi'
-                  ? 'bg-[#E07A2F] hover:bg-orange-600 text-white shadow-md'
-                  : 'border border-gray-300 text-gray-400 bg-gray-50/50 cursor-not-allowed'
-              }`}
+              className={`w-full py-3 sm:py-3.5 px-4 rounded-xl sm:rounded-2xl font-bold transition-all text-center text-sm sm:text-base cursor-pointer active:scale-98 ${order.status === 'Menunggu Konfirmasi'
+                ? 'bg-[#E07A2F] hover:bg-orange-600 text-white shadow-md'
+                : 'border border-gray-300 text-gray-400 bg-gray-50/50 cursor-not-allowed'
+                }`}
             >
               Konfirmasi Pesanan
             </button>
@@ -708,11 +617,10 @@ export default function DetailPesananPage() {
             ) : (
               <button
                 onClick={handleSiapDiambil}
-                className={`w-full py-3 sm:py-3.5 px-4 rounded-xl sm:rounded-2xl font-bold transition-all text-center text-sm sm:text-base cursor-pointer active:scale-98 ${
-                  order.status === 'Sedang Disiapkan'
-                    ? 'bg-[#E07A2F] hover:bg-orange-600 text-white shadow-md'
-                    : 'border border-gray-300 text-gray-400 bg-gray-50/50'
-                }`}
+                className={`w-full py-3 sm:py-3.5 px-4 rounded-xl sm:rounded-2xl font-bold transition-all text-center text-sm sm:text-base cursor-pointer active:scale-98 ${order.status === 'Sedang Disiapkan'
+                  ? 'bg-[#E07A2F] hover:bg-orange-600 text-white shadow-md'
+                  : 'border border-gray-300 text-gray-400 bg-gray-50/50'
+                  }`}
               >
                 Siap Diambil
               </button>

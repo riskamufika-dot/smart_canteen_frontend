@@ -47,22 +47,18 @@ export default function KeranjangPage() {
     }
     setLoading(true);
 
-    // 1. Ambil Data Pelanggan yang Login
     const userLocal = JSON.parse(
       localStorage.getItem('user') || localStorage.getItem('smart_canteen_user') || '{}'
     );
     const namaPelanggan = userLocal.username || userLocal.nama || 'Siswa Pelanggan';
 
-    // 2. Hitung Total Price
     const totalHarga = selectedItems.reduce(
       (sum: number, item: any) => sum + Number(item.price || 0) * Number(item.quantity || 1),
       0
     );
 
-    // 3. Generate Unik order_id
     const generatedOrderId = `#SC${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
 
-    // 4. Format Items untuk LocalStorage & Component Strapi
     const localItems = selectedItems.map((item: any) => ({
       id: String(item.id),
       nama: String(item.name || item.nama || 'Makanan'),
@@ -83,24 +79,23 @@ export default function KeranjangPage() {
       };
     });
 
-    // 5. Payload yang 100% Presisi dengan Enum Strapi
     const strapiPayload = {
       data: {
         order_id: generatedOrderId,
         customer_name: namaPelanggan,
-        payment_method: paymentMethod.toLowerCase() === 'cash' ? 'cash' : 'saldo_digital', // FIX: Enum huruf kecil sesuai error!
+        payment_method: paymentMethod.toLowerCase() === 'cash' ? 'cash' : 'saldo_digital',
         total_price: totalHarga,
         menu_status: 'pending',
-        payment_status: 'Tertunda', // FIX: Enum (Sukses, Gagal, Tertunda)
+        payment_status: 'Tertunda',
         pickup_time: pickupTime,
         pickup_date: pickupDate,
         items: strapiItemsComponent,
       },
     };
 
-    // 6. Cadangan Data Lokal untuk Halaman Status Pesanan
     const pesananLokal = {
       orderId: generatedOrderId,
+      order_id: generatedOrderId,
       createdAt: new Date().toISOString(),
       status: 'Menunggu Konfirmasi',
       menu_status: 'pending',
@@ -112,7 +107,6 @@ export default function KeranjangPage() {
       paymentMethod: paymentMethod,
     };
 
-    // 7. Proses Pengiriman ke Database Strapi
     try {
       const response = await fetch(`${STRAPI_URL}/api/orders`, {
         method: 'POST',
@@ -127,6 +121,9 @@ export default function KeranjangPage() {
       if (response.ok) {
         console.log('✅ Pesanan berhasil tersimpan di Strapi:', resJson);
 
+        // 💡 SIMPAN ORDER ID AKTIF AGAR USER TIDAK MELIHAT PESANAN ORANG LAIN
+        localStorage.setItem('active_order_id', generatedOrderId);
+
         const dataLama = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
         dataLama.unshift(pesananLokal);
         localStorage.setItem('smart_canteen_orders', JSON.stringify(dataLama));
@@ -135,22 +132,16 @@ export default function KeranjangPage() {
         router.push('/status-pesanan');
       } else {
         console.error('❌ Error Detail dari Strapi:', resJson);
-
         const details = resJson?.error?.details?.errors;
         let detailMessage = '';
         if (Array.isArray(details)) {
           detailMessage = details.map((e: any) => `- ${e.path ? e.path.join('.') : 'field'}: ${e.message}`).join('\n');
         }
-
-        alert(
-          `Gagal menyimpan ke database Strapi!\n\nRincian Error:\n${
-            detailMessage || resJson?.error?.message || 'Format data ditolak oleh Strapi'
-          }`
-        );
+        alert(`Gagal menyimpan ke database Strapi!\n\n${detailMessage || resJson?.error?.message}`);
       }
     } catch (err) {
-      console.warn('⚠️ Server Strapi offline / error koneksi:', err);
-      alert('Tidak dapat terhubung ke server Strapi. Pastikan backend Strapi sedang menyala.');
+      console.warn('⚠️ Server Strapi offline:', err);
+      alert('Tidak dapat terhubung ke server Strapi.');
     } finally {
       setLoading(false);
     }
@@ -159,8 +150,6 @@ export default function KeranjangPage() {
   return (
     <div className="w-full min-h-screen bg-white font-sans text-gray-900 flex flex-col justify-between">
       <div className="w-full py-6 px-4 sm:px-8 space-y-6 pb-28">
-        
-        {/* HEADER */}
         <div className="flex items-center justify-between pb-4 border-b border-gray-100">
           <button onClick={() => router.back()} className="text-gray-900 hover:text-orange-500 transition-colors p-1 -ml-1 cursor-pointer">
             <ArrowLeft size={26} />
@@ -188,7 +177,6 @@ export default function KeranjangPage() {
               <span className="text-xs sm:text-sm text-gray-400">{selectedItems.length} Terpilih</span>
             </div>
 
-            {/* DAFTAR ITEM */}
             <div className="bg-white border border-gray-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-5">
               {cartItems.map((item) => {
                 const isChecked = item.selected ?? true;
@@ -220,7 +208,6 @@ export default function KeranjangPage() {
                       </div>
                     </div>
 
-                    {/* MENAMPILKAN CATATAN JIKA ADA */}
                     {itemNote && (
                       <div className="ml-8 sm:ml-10 flex items-center gap-1.5 text-xs sm:text-sm text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100 w-fit">
                         <FileText size={14} className="text-gray-400 shrink-0" />

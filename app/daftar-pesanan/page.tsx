@@ -2,15 +2,14 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Search, ChevronRight, Loader2, Inbox } from 'lucide-react';
 
 const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
 
 interface Order {
   id: number | string;
-  documentId?: string;
   orderId: string;
-  rawOrderId: string; // ID bersih tanpa tanda #
+  rawOrderId: string;
   customerName: string;
   customerClass: string;
   orderTime: string;
@@ -25,16 +24,18 @@ export default function DaftarPesananPage() {
 
   const fetchOrders = useCallback(async () => {
     try {
-      const res = await fetch(`${STRAPI_URL}/api/orders?populate=*&sort[0]=createdAt:desc`, {
-        cache: 'no-store'
-      });
-      
+      // API query standar yang pasti didukung Strapi v5
+      const res = await fetch(
+        `${STRAPI_URL}/api/orders?populate=*&sort[0]=createdAt:desc`,
+        { cache: 'no-store' }
+      );
+
       if (res.ok) {
         const json = await res.json();
         const dataList = json.data || [];
 
         const formattedOrders: Order[] = dataList.map((item: any) => {
-          const attr = item.attributes ? { ...item.attributes, id: item.id, documentId: item.documentId } : item;
+          const attr = item.attributes ? { ...item.attributes, id: item.id } : item;
           const userObj = attr.users_permissions_user?.data?.attributes || attr.users_permissions_user || attr.user || {};
 
           const rawDate = attr.createdAt ? new Date(attr.createdAt) : new Date();
@@ -42,23 +43,22 @@ export default function DaftarPesananPage() {
             hour: '2-digit',
             minute: '2-digit',
             hour12: false,
-          }).replace('.', ':');
+          }).replace('.', ':') + ' WIB';
 
-          const rawStatus = String(attr.menu_status || attr.status || attr.order_status || 'Menunggu Konfirmasi');
+          const rawStatus = String(attr.menu_status || attr.status_pesanan || attr.status || 'pending').toLowerCase();
           let displayStatus = 'Menunggu Konfirmasi';
-          if (rawStatus.toLowerCase().includes('disiapkan') || rawStatus === 'sedang_disiapkan') displayStatus = 'Sedang Disiapkan';
-          else if (rawStatus.toLowerCase().includes('siap') || rawStatus === 'siap_diambil') displayStatus = 'Siap Diambil';
-          else if (rawStatus.toLowerCase().includes('selesai')) displayStatus = 'Selesai';
+          if (rawStatus.includes('disiapkan') || rawStatus === 'sedang_disiapkan') displayStatus = 'Sedang Disiapkan';
+          else if (rawStatus.includes('siap') || rawStatus === 'siap_diambil') displayStatus = 'Siap Diambil';
+          else if (rawStatus.includes('selesai')) displayStatus = 'Selesai';
 
           const fullOrderId = attr.order_id || attr.orderId || `#SC-${item.id}`;
           const cleanOrderId = String(fullOrderId).replace('#', '').trim();
 
           return {
             id: item.id,
-            documentId: item.documentId,
             orderId: fullOrderId,
             rawOrderId: cleanOrderId,
-            customerName: attr.customer_name || attr.nama_siswa || userObj.username || userObj.nama || 'Pelanggan',
+            customerName: attr.customer_name || userObj.username || userObj.nama || 'Siswa Pelanggan',
             customerClass: attr.kelas || attr.customer_class || userObj.kelas || '-',
             orderTime: orderTime,
             status: displayStatus,
@@ -79,7 +79,7 @@ export default function DaftarPesananPage() {
 
     const interval = setInterval(() => {
       fetchOrders();
-    }, 4000);
+    }, 3000);
 
     return () => clearInterval(interval);
   }, [fetchOrders]);
@@ -90,85 +90,121 @@ export default function DaftarPesananPage() {
       o.orderId.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Helper Navigasi Detail Pesanan yang Aman
   const handleNavigateDetail = (order: Order) => {
-    // Prioritas param: documentId -> rawOrderId (tanpa #) -> id
-    const targetParam = order.documentId || order.rawOrderId || order.id;
+    // Navigasi menggunakan ID bersih (contoh: SC260811-473 atau 47)
+    const targetParam = order.rawOrderId || String(order.id);
     router.push(`/daftar-pesanan/${encodeURIComponent(targetParam)}`);
   };
 
   return (
-    <div className="min-h-screen bg-white p-6 font-sans">
-      <div className="max-w-6xl mx-auto space-y-6">
-        <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900">Daftar Pesanan</h1>
+    <div className="min-h-screen w-full bg-white font-sans flex flex-col p-4 sm:p-6 text-slate-800">
+      
+      {/* HEADER TOPBAR */}
+      <div className="flex items-center gap-4 mb-6">
+        <button 
+          onClick={() => router.back()}
+          className="p-1 text-slate-800 hover:text-slate-600 transition-colors cursor-pointer flex items-center justify-center"
+          title="Kembali"
+        >
+          <ArrowLeft size={24} strokeWidth={2.5} />
+        </button>
+        <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+          Daftar Pesanan
+        </h1>
+      </div>
 
-        {/* Search Bar */}
-        <div className="relative max-w-md">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Cari nama atau ID pesanan..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:border-[#E07A2F] text-sm font-medium"
-          />
-        </div>
+      {/* SEARCH BAR */}
+      <div className="w-full max-w-md mb-6 relative">
+        <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input
+          type="text"
+          placeholder="Cari nama atau ID pesanan..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-[#E07A2F] transition-all placeholder:text-slate-400 shadow-xs"
+        />
+      </div>
 
-        {/* Table Pesanan */}
-        <div className="border border-gray-200 rounded-2xl overflow-hidden bg-white shadow-xs">
-          <table className="w-full text-left border-collapse">
+      {/* TABEL FULL SCREEN */}
+      <div className="w-full border-y sm:border border-gray-200 sm:rounded-2xl overflow-hidden flex-1 flex flex-col bg-white shadow-xs">
+        <div className="overflow-x-auto w-full flex-1">
+          <table className="w-full text-left border-collapse min-w-[750px]">
             <thead>
-              <tr className="border-b border-gray-200 bg-gray-50 text-gray-600 font-bold text-sm">
-                <th className="py-3 px-4">ID Pemesanan</th>
-                <th className="py-3 px-4">Nama</th>
-                <th className="py-3 px-4">Kelas</th>
-                <th className="py-3 px-4">Jam Pesan</th>
-                <th className="py-3 px-4">Status</th>
-                <th className="py-3 px-4 text-center">Aksi</th>
+              <tr className="border-b border-gray-200 bg-slate-50/80 text-black font-bold text-sm">
+                <th className="p-4 sm:p-5">ID Pemesanan</th>
+                <th className="p-4 sm:p-5">Nama</th>
+                <th className="p-4 sm:p-5 text-center">Kelas</th>
+                <th className="p-4 sm:p-5 text-center">Jam Pesan</th>
+                <th className="p-4 sm:p-5 text-center">Status</th>
+                <th className="p-4 sm:p-5 text-center w-20">Aksi</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100 text-sm font-semibold">
+            <tbody className="divide-y divide-gray-100 text-sm font-medium text-gray-900">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-gray-400">Memuat data pesanan...</td>
+                  <td colSpan={6} className="p-16 text-center text-slate-400 font-normal">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <Loader2 className="w-7 h-7 animate-spin text-[#E07A2F]" />
+                      <span>Memuat data pesanan...</span>
+                    </div>
+                  </td>
                 </tr>
               ) : filteredOrders.length > 0 ? (
                 filteredOrders.map((order) => (
-                  <tr key={order.id} className="hover:bg-gray-50/50">
-                    <td className="py-4 px-4 font-extrabold text-[#E07A2F]">{order.orderId}</td>
-                    <td className="py-4 px-4 text-gray-900">{order.customerName}</td>
-                    <td className="py-4 px-4 text-gray-700">{order.customerClass}</td>
-                    <td className="py-4 px-4 text-gray-700">{order.orderTime} WIB</td>
-                    <td className="py-4 px-4">
-                      <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${
-                        order.status === 'Menunggu Konfirmasi' ? 'bg-orange-100 text-orange-600' :
-                        order.status === 'Sedang Disiapkan' ? 'bg-yellow-100 text-yellow-700' :
-                        order.status === 'Siap Diambil' ? 'bg-blue-100 text-blue-600' :
-                        'bg-green-100 text-green-600'
+                  <tr 
+                    key={order.id} 
+                    onClick={() => handleNavigateDetail(order)}
+                    className="hover:bg-slate-50/80 transition-colors cursor-pointer group"
+                  >
+                    <td className="p-4 sm:p-5 font-bold text-[#E07A2F] whitespace-nowrap align-middle">
+                      {order.orderId}
+                    </td>
+
+                    <td className="p-4 sm:p-5 font-bold text-slate-900 whitespace-nowrap align-middle">
+                      {order.customerName}
+                    </td>
+
+                    <td className="p-4 sm:p-5 text-center text-slate-600 font-medium whitespace-nowrap align-middle">
+                      {order.customerClass}
+                    </td>
+
+                    <td className="p-4 sm:p-5 text-center text-slate-800 font-semibold whitespace-nowrap align-middle">
+                      {order.orderTime}
+                    </td>
+
+                    <td className="p-4 sm:p-5 text-center whitespace-nowrap align-middle">
+                      <span className={`px-4 py-1.5 text-xs font-bold rounded-full inline-block ${
+                        order.status === 'Sedang Disiapkan' ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
+                        order.status === 'Siap Diambil' ? 'bg-blue-100 text-blue-600 border border-blue-200' :
+                        order.status === 'Selesai' ? 'bg-green-100 text-green-600 border border-green-200' :
+                        'bg-orange-100 text-orange-600 border border-orange-200'
                       }`}>
                         {order.status}
                       </span>
                     </td>
-                    <td className="py-4 px-4 text-center">
-                      <button
-                        onClick={() => handleNavigateDetail(order)}
-                        className="p-2 hover:bg-orange-100 text-[#E07A2F] rounded-full transition-colors cursor-pointer inline-flex items-center justify-center"
-                        title="Lihat Detail"
-                      >
-                        <ChevronRight className="w-5 h-5 stroke-[2.5]" />
-                      </button>
+
+                    <td className="p-4 sm:p-5 text-center whitespace-nowrap align-middle">
+                      <div className="flex items-center justify-center text-[#E07A2F] group-hover:translate-x-1 transition-transform">
+                        <ChevronRight size={20} strokeWidth={2.5} />
+                      </div>
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-gray-400">Tidak ada pesanan.</td>
+                  <td colSpan={6} className="p-16 text-center text-slate-400 font-normal">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <Inbox className="w-8 h-8 text-slate-300" />
+                      <span>Belum ada pesanan ditemukan.</span>
+                    </div>
+                  </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
+
     </div>
   );
 }
