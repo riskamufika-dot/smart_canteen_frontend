@@ -98,15 +98,33 @@ export default function HomePage() {
       setLoading(true);
       try {
         const [resMenus, resHomes] = await Promise.all([
-          fetch(`${STRAPI_URL}/api/menus?populate=*&pagination[limit]=1000`),
-          fetch(`${STRAPI_URL}/api/homes?populate=*&pagination[limit]=1000`),
+          fetch(`${STRAPI_URL}/api/menus?populate=*&pagination[pageSize]=1000`).catch(() => null),
+          fetch(`${STRAPI_URL}/api/homes?populate=*&pagination[pageSize]=1000`).catch(() => null),
         ]);
 
-        const dataMenus = await resMenus.json();
-        const dataHomes = await resHomes.json();
+        let fetchedMenus: MenuItem[] = [];
+        let fetchedTenants: TenantItem[] = [];
 
-        setMenus(dataMenus?.data || []);
-        setTenants(dataHomes?.data || []);
+        if (resMenus && resMenus.ok) {
+          try {
+            const jsonMenus = await resMenus.json();
+            fetchedMenus = jsonMenus?.data || [];
+          } catch (e) {
+            console.warn('Gagal parsing JSON menu:', e);
+          }
+        }
+
+        if (resHomes && resHomes.ok) {
+          try {
+            const jsonHomes = await resHomes.json();
+            fetchedTenants = jsonHomes?.data || [];
+          } catch (e) {
+            console.warn('Gagal parsing JSON homes:', e);
+          }
+        }
+
+        setMenus(fetchedMenus);
+        setTenants(fetchedTenants);
       } catch (error) {
         console.error('Gagal mengambil data:', error);
       } finally {

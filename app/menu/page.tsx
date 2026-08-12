@@ -109,10 +109,12 @@ function MenuContent() {
       setLoading(true);
       try {
         const response = await fetch(
-          `${STRAPI_URL}/api/menus?populate=*&pagination[limit]=10000`
-        );
-        const res: MenusRepsonse['res'] = await response.json();
-        setData(res);
+          `${STRAPI_URL}/api/menus?populate=*&pagination[pageSize]=1000`
+        ).catch(() => null);
+        if (response && response.ok) {
+          const res: MenusRepsonse['res'] = await response.json();
+          setData(res);
+        }
       } catch (error) {
         console.error({ error });
       } finally {
