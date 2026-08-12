@@ -1,9 +1,64 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Star, Plus, LogOut, Search } from 'lucide-react';
 import Link from 'next/link';
+
+// CONFIG STRAPI URL LOKAL TANPA FILE LIB
+const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
+
+// FUNGSI HELPER AMBIL URL GAMBAR STRAPI SECARA LOKAL
+const getImageUrl = (item: any): string => {
+  if (!item) return '';
+
+  // 1. Ambil objek gambar dari berbagai kemungkinan properti field
+  const rawImage =
+    item?.image ||
+    item?.foto ||
+    item?.gambar ||
+    item?.attributes?.image ||
+    item?.attributes?.foto ||
+    item?.attributes?.gambar;
+
+  if (!rawImage) return '';
+
+  // 2. Jika berbentuk string
+  if (typeof rawImage === 'string') {
+    if (rawImage.startsWith('http://') || rawImage.startsWith('https://')) {
+      return rawImage;
+    }
+    return `${STRAPI_URL}${rawImage.startsWith('/') ? '' : '/'}${rawImage}`;
+  }
+
+  // 3. Jika berbentuk objek Strapi v4 / v5
+  const url =
+    rawImage?.data?.attributes?.url ||
+    rawImage?.data?.url ||
+    rawImage?.attributes?.url ||
+    rawImage?.url;
+
+  if (url) {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    return `${STRAPI_URL}${url.startsWith('/') ? '' : '/'}${url}`;
+  }
+
+  // 4. Jika berbentuk Array of Media
+  if (Array.isArray(rawImage?.data) && rawImage.data.length > 0) {
+    const firstImg = rawImage.data[0];
+    const arrayUrl = firstImg?.attributes?.url || firstImg?.url;
+    if (arrayUrl) {
+      if (arrayUrl.startsWith('http://') || arrayUrl.startsWith('https://')) {
+        return arrayUrl;
+      }
+      return `${STRAPI_URL}${arrayUrl.startsWith('/') ? '' : '/'}${arrayUrl}`;
+    }
+  }
+
+  return '';
+};
 
 interface MenusRepsonse {
   res: {
@@ -35,7 +90,7 @@ interface MenusRepsonse {
   };
 }
 
-export default function MenuPage() {
+function MenuContent() {
   const [data, setData] = useState<MenusRepsonse['res'] | undefined>(undefined);
   const [loading, setLoading] = useState<boolean>(true);
   const router = useRouter();
@@ -54,7 +109,7 @@ export default function MenuPage() {
       setLoading(true);
       try {
         const response = await fetch(
-          'http://localhost:1337/api/menus?populate=*&pagination[limit]=10000'
+          `${STRAPI_URL}/api/menus?populate=*&pagination[limit]=10000`
         );
         const res: MenusRepsonse['res'] = await response.json();
         setData(res);
@@ -86,25 +141,6 @@ export default function MenuPage() {
     if (!menu) return 0;
     const attr = menu.attributes || menu;
     return Number(attr.price || attr.harga || 0);
-  };
-
-  // Helper URL Gambar Aman
-  const getImageUrl = (menu: any) => {
-    if (!menu) return '/placeholder.jpeg';
-    const attr = menu.attributes || menu;
-    const imageObj = attr.image || attr.foto || attr.gambar || menu.image;
-
-    if (!imageObj) return '/placeholder.jpeg';
-
-    const imgPath =
-      imageObj.url ||
-      imageObj.data?.attributes?.url ||
-      imageObj.attributes?.url ||
-      imageObj.formats?.medium?.url ||
-      imageObj.formats?.small?.url;
-
-    if (!imgPath) return '/placeholder.jpeg';
-    return imgPath.startsWith('http') ? imgPath : `http://localhost:1337${imgPath}`;
   };
 
   // 2. Filter Search pada Seluruh Data Database
@@ -165,6 +201,9 @@ export default function MenuPage() {
             src="/bg_makanan.jpeg"
             alt="Banner Makanan"
             className="w-full h-full object-cover object-center opacity-80 brightness-90"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = 'https://via.placeholder.com/800x300?text=Banner+Makanan';
+            }}
           />
 
           <div className="absolute inset-0 bg-black/20 flex flex-col items-center justify-center px-4 text-center">
@@ -220,11 +259,20 @@ export default function MenuPage() {
                 >
                   {/* Foto Makanan */}
                   <div className="h-28 w-28 sm:h-32 sm:w-32 flex-shrink-0 overflow-hidden rounded-2xl bg-gray-100">
-                    <img
-                      src={imgUrl}
-                      alt={name}
-                      className="h-full w-full object-cover object-center"
-                    />
+                    {imgUrl ? (
+                      <img
+                        src={imgUrl}
+                        alt={name}
+                        className="h-full w-full object-cover object-center"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = 'https://via.placeholder.com/150?text=Menu';
+                        }}
+                      />
+                    ) : (
+                      <div className="h-full w-full flex items-center justify-center text-xs text-gray-400 bg-gray-50">
+                        No Image
+                      </div>
+                    )}
                   </div>
 
                   {/* Info Makanan */}
@@ -248,7 +296,7 @@ export default function MenuPage() {
                       {/* TOMBOL PLUS */}
                       <button
                         onClick={() => handleGoToDetail(menu)}
-                        className="rounded-xl bg-orange-500 p-2 text-black shadow-md hover:bg-orange-600 transition-colors active:scale-95 flex items-center justify-center"
+                        className="rounded-xl bg-orange-500 p-2 text-black shadow-md hover:bg-orange-600 transition-colors active:scale-95 flex items-center justify-center cursor-pointer"
                         title="Lihat Detail Menu"
                       >
                         <Plus size={18} />
@@ -275,7 +323,7 @@ export default function MenuPage() {
                 router.push(`/menu?page=${nextSec}`);
               }}
               disabled={activeSection === 1}
-              className="px-2 py-1 text-sm text-gray-500 hover:text-black disabled:opacity-30 transition-colors"
+              className="px-2 py-1 text-sm text-gray-500 hover:text-black disabled:opacity-30 transition-colors cursor-pointer"
             >
               &lt;
             </button>
@@ -288,7 +336,7 @@ export default function MenuPage() {
                   setSearchTerm('');
                   router.push(`/menu?page=${sectionNum}`);
                 }}
-                className={`h-9 w-9 rounded-full text-xs font-semibold transition-all ${
+                className={`h-9 w-9 rounded-full text-xs font-semibold transition-all cursor-pointer ${
                   activeSection === sectionNum
                     ? 'bg-orange-500 text-black shadow-md scale-105'
                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -305,7 +353,7 @@ export default function MenuPage() {
                 router.push(`/menu?page=${nextSec}`);
               }}
               disabled={activeSection === 4}
-              className="px-2 py-1 text-sm text-gray-500 hover:text-black disabled:opacity-30 transition-colors"
+              className="px-2 py-1 text-sm text-gray-500 hover:text-black disabled:opacity-30 transition-colors cursor-pointer"
             >
               &gt;
             </button>
@@ -314,5 +362,17 @@ export default function MenuPage() {
 
       </main>
     </div>
+  );
+}
+
+export default function MenuPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#FDFDFD] flex items-center justify-center text-gray-400">
+        Memuat menu...
+      </div>
+    }>
+      <MenuContent />
+    </Suspense>
   );
 }

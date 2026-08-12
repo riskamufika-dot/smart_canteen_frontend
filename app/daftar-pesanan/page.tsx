@@ -1,189 +1,216 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { ArrowLeft } from 'lucide-react';
-import Link from 'next/link';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import { Search, ChevronRight } from 'lucide-react';
 
-// 1. Tipe data status pesanan yang valid
-type OrderStatus = 'Siap Diambil' | 'Sedang Disiapkan' | 'Menunggu Konfirmasi' | 'Selesai';
+const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
 
-interface OrderItem {
-  id: string;
-  customer: string;
-  time: string;
-  itemCount: number;
-  price: string;
-  status: OrderStatus;
+interface Order {
+  id: number | string;
+  documentId?: string;
+  orderId: string;
+  rawOrderId: string; // ID bersih tanpa tanda #
+  customerName: string;
+  customerClass: string;
+  orderTime: string;
+  status: string;
 }
 
-type TabType = 'Semua' | 'Menunggu' | 'Sedang Disiapkan' | 'Siap Diambil' | 'Selesai';
+export default function DaftarPesananPage() {
+  const router = useRouter();
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [loading, setLoading] = useState(true);
 
-const INITIAL_ORDERS: OrderItem[] = [
-  { id: '#SC09062026-001', customer: 'Siswa A', time: '09:30', itemCount: 2, price: 'Rp 16.000', status: 'Siap Diambil' },
-  { id: '#SC09062026-002', customer: 'Siswa B', time: '09:25', itemCount: 3, price: 'Rp 15.000', status: 'Sedang Disiapkan' },
-  { id: '#SC09062026-003', customer: 'Siswa C', time: '09:20', itemCount: 1, price: 'Rp 5.000', status: 'Menunggu Konfirmasi' },
-  { id: '#SC09062026-004', customer: 'Siswa D', time: '09:40', itemCount: 4, price: 'Rp 12.000', status: 'Siap Diambil' },
-  { id: '#SC09062026-005', customer: 'Siswa F', time: '08:50', itemCount: 2, price: 'Rp 10.000', status: 'Selesai' },
-  { id: '#SC09062026-006', customer: 'Siswa G', time: '09:00', itemCount: 3, price: 'Rp 24.000', status: 'Sedang Disiapkan' },
-  { id: '#SC09062026-007', customer: 'Siswa H', time: '08:30', itemCount: 1, price: 'Rp 8.000', status: 'Selesai' },
-];
+  const fetchOrders = useCallback(async () => {
+    let allOrders: Order[] = [];
 
-export default function DaftarPesanan() {
-  const [activeTab, setActiveTab] = useState<TabType>('Semua');
-  const [orders, setOrders] = useState<OrderItem[]>([]);
-  const [isLoaded, setIsLoaded] = useState(false);
+    // 1. Ambil Data Lokal sebagai basis / fallback
+    try {
+      const localData = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
+      allOrders = localData.map((data: any, idx: number) => {
+        const attr = data.data || data;
+        const rawDate = attr.createdAt ? new Date(attr.createdAt) : new Date();
+        const orderTime = rawDate.toLocaleTimeString('id-ID', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }).replace('.', ':');
 
-  // Ambil data dari localStorage saat pertama kali dimuat
-  useEffect(() => {
-    const saved = localStorage.getItem('smart_canteen_orders');
-    if (saved) {
-      try {
-        setOrders(JSON.parse(saved));
-      } catch (e) {
-        setOrders(INITIAL_ORDERS);
-      }
-    } else {
-      setOrders(INITIAL_ORDERS);
+        const rawStatus = String(attr.status || attr.menu_status || attr.order_status || 'Menunggu Konfirmasi');
+        let displayStatus = 'Menunggu Konfirmasi';
+        if (rawStatus.toLowerCase().includes('disiapkan') || rawStatus === 'sedang_disiapkan') displayStatus = 'Sedang Disiapkan';
+        else if (rawStatus.toLowerCase().includes('siap') || rawStatus === 'siap_diambil') displayStatus = 'Siap Diambil';
+        else if (rawStatus.toLowerCase().includes('selesai')) displayStatus = 'Selesai';
+
+        const fullOrderId = attr.orderId || attr.order_id || `#SC-${attr.id || idx + 1}`;
+        const cleanOrderId = String(fullOrderId).replace('#', '').trim();
+
+        return {
+          id: attr.id || idx + 1,
+          documentId: attr.documentId,
+          orderId: fullOrderId,
+          rawOrderId: cleanOrderId,
+          customerName: attr.customer_name || attr.customerName || attr.nama_siswa || attr.username || 'Pelanggan',
+          customerClass: attr.kelas || attr.customer_class || '-',
+          orderTime: orderTime,
+          status: displayStatus,
+        };
+      });
+    } catch (err) {
+      console.warn('Gagal membaca LocalStorage pesanan:', err);
     }
-    setIsLoaded(true);
+
+    // 2. Ambil dari Strapi Backend jika online
+    try {
+      const res = await fetch(`${STRAPI_URL}/api/orders?populate=*&sort[0]=createdAt:desc`, {
+        cache: 'no-store'
+      });
+      
+      if (res.ok) {
+        const json = await res.json();
+        const dataList = json.data || [];
+
+        const strapiFormatted: Order[] = dataList.map((item: any) => {
+          const attr = item.attributes ? { ...item.attributes, id: item.id, documentId: item.documentId } : item;
+          const userObj = attr.users_permissions_user?.data?.attributes || attr.users_permissions_user || attr.user || {};
+
+          const rawDate = attr.createdAt ? new Date(attr.createdAt) : new Date();
+          const orderTime = rawDate.toLocaleTimeString('id-ID', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+          }).replace('.', ':');
+
+          const rawStatus = String(attr.menu_status || attr.status || attr.order_status || 'Menunggu Konfirmasi');
+          let displayStatus = 'Menunggu Konfirmasi';
+          if (rawStatus.toLowerCase().includes('disiapkan') || rawStatus === 'sedang_disiapkan') displayStatus = 'Sedang Disiapkan';
+          else if (rawStatus.toLowerCase().includes('siap') || rawStatus === 'siap_diambil') displayStatus = 'Siap Diambil';
+          else if (rawStatus.toLowerCase().includes('selesai')) displayStatus = 'Selesai';
+
+          const fullOrderId = attr.order_id || attr.orderId || `#SC-${item.id}`;
+          const cleanOrderId = String(fullOrderId).replace('#', '').trim();
+
+          return {
+            id: item.id,
+            documentId: item.documentId,
+            orderId: fullOrderId,
+            rawOrderId: cleanOrderId,
+            customerName: attr.customer_name || attr.nama_siswa || userObj.username || userObj.nama || 'Pelanggan',
+            customerClass: attr.kelas || attr.customer_class || userObj.kelas || '-',
+            orderTime: orderTime,
+            status: displayStatus,
+          };
+        });
+
+        if (strapiFormatted.length > 0) {
+          allOrders = strapiFormatted;
+        }
+      }
+    } catch (e) {
+      console.warn('Gagal koneksi ke Strapi, menggunakan data pesanan lokal:', e);
+    } finally {
+      setOrders(allOrders);
+      setLoading(false);
+    }
   }, []);
 
-  // Simpan data ke localStorage setiap kali ada perubahan status
   useEffect(() => {
-    if (isLoaded) {
-      localStorage.setItem('smart_canteen_orders', JSON.stringify(orders));
-    }
-  }, [orders, isLoaded]);
+    fetchOrders();
 
-  const tabs: TabType[] = ['Semua', 'Menunggu', 'Sedang Disiapkan', 'Siap Diambil', 'Selesai'];
+    const interval = setInterval(() => {
+      fetchOrders();
+    }, 4000);
 
-  // Fungsi untuk mengubah siklus status saat diklik
-  const handleStatusChange = (orderId: string, currentStatus: OrderStatus) => {
-    setOrders((prevOrders) =>
-      prevOrders.map((order) => {
-        if (order.id === orderId) {
-          let nextStatus: OrderStatus = 'Menunggu Konfirmasi';
-          if (currentStatus === 'Menunggu Konfirmasi') nextStatus = 'Sedang Disiapkan';
-          else if (currentStatus === 'Sedang Disiapkan') nextStatus = 'Siap Diambil';
-          else if (currentStatus === 'Siap Diambil') nextStatus = 'Selesai';
-          else if (currentStatus === 'Selesai') nextStatus = 'Menunggu Konfirmasi';
+    return () => clearInterval(interval);
+  }, [fetchOrders]);
 
-          return { ...order, status: nextStatus };
-        }
-        return order;
-      })
-    );
+  const filteredOrders = orders.filter(
+    (o) =>
+      o.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      o.orderId.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // Helper Navigasi Detail Pesanan yang Aman
+  const handleNavigateDetail = (order: Order) => {
+    // Prioritas param: documentId -> rawOrderId (tanpa #) -> id
+    const targetParam = order.documentId || order.rawOrderId || order.id;
+    router.push(`/daftar-pesanan/${encodeURIComponent(targetParam)}`);
   };
 
-  const filteredOrders = orders.filter((order) => {
-    if (activeTab === 'Semua') return true;
-    if (activeTab === 'Menunggu') return order.status === 'Menunggu Konfirmasi';
-    return order.status === activeTab;
-  });
-
   return (
-    <div className="min-h-screen bg-slate-50 p-4 sm:p-6 md:p-10 font-sans text-slate-800">
-      <div className="w-full max-w-7xl mx-auto bg-white border border-slate-100 rounded-2xl sm:rounded-3xl p-4 sm:p-6 md:p-8 shadow-sm overflow-hidden">
-        
-        {/* Header */}
-        <div className="flex items-center gap-3 sm:gap-4 mb-6 sm:mb-8">
-          <Link href="/dasboard-admin" className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-700">
-            <ArrowLeft size={22} />
-          </Link>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Daftar Pesanan</h1>
+    <div className="min-h-screen bg-white p-6 font-sans">
+      <div className="max-w-6xl mx-auto space-y-6">
+        <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900">Daftar Pesanan</h1>
+
+        {/* Search Bar */}
+        <div className="relative max-w-md">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Cari nama atau ID pesanan..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:border-[#E07A2F] text-sm font-medium"
+          />
         </div>
 
-        {/* Tab Filter (Responsif & Bisa di-scroll di HP) */}
-        <div className="flex border-b border-slate-200 mb-6 sm:mb-8 gap-1 sm:gap-2 overflow-x-auto whitespace-nowrap pb-1 no-scrollbar">
-          {tabs.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-4 sm:px-6 py-2.5 sm:py-3 font-semibold text-xs sm:text-sm rounded-t-xl transition-all shrink-0 ${
-                activeTab === tab
-                  ? 'text-orange-500 bg-orange-50/70 border-b-2 border-orange-500'
-                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-              }`}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
-
-        {/* Container Tabel dengan Scroll Horizontal di Layar Kecil */}
-        <div className="border border-slate-200 rounded-xl sm:rounded-2xl overflow-x-auto">
-          <table className="w-full min-w-[650px] text-left border-collapse">
+        {/* Table Pesanan */}
+        <div className="border border-gray-200 rounded-2xl overflow-hidden bg-white shadow-xs">
+          <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50/50 text-slate-900 font-bold text-xs sm:text-sm">
-                <th className="p-3 sm:p-4 pl-4 sm:pl-6">Order Id</th>
-                <th className="p-3 sm:p-4">Pelanggan</th>
-                <th className="p-3 sm:p-4">Waktu</th>
-                <th className="p-3 sm:p-4">Item</th>
-                <th className="p-3 sm:p-4">Harga</th>
-                <th className="p-3 sm:p-4 pr-4 sm:pr-6">Status (Klik untuk Ubah)</th>
+              <tr className="border-b border-gray-200 bg-gray-50 text-gray-600 font-bold text-sm">
+                <th className="py-3 px-4">ID Pemesanan</th>
+                <th className="py-3 px-4">Nama</th>
+                <th className="py-3 px-4">Kelas</th>
+                <th className="py-3 px-4">Jam Pesan</th>
+                <th className="py-3 px-4">Status</th>
+                <th className="py-3 px-4 text-center">Aksi</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-xs sm:text-sm font-semibold text-slate-700">
-              {filteredOrders.length > 0 ? (
+            <tbody className="divide-y divide-gray-100 text-sm font-semibold">
+              {loading ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-gray-400">Memuat data pesanan...</td>
+                </tr>
+              ) : filteredOrders.length > 0 ? (
                 filteredOrders.map((order) => (
-                  <tr key={order.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="p-3 sm:p-4 pl-4 sm:pl-6 text-slate-900 whitespace-nowrap">{order.id}</td>
-                    <td className="p-3 sm:p-4 whitespace-nowrap">{order.customer}</td>
-                    <td className="p-3 sm:p-4 text-slate-500 whitespace-nowrap">{order.time}</td>
-                    <td className="p-3 sm:p-4 text-slate-600 whitespace-nowrap">{order.itemCount} Item</td>
-                    <td className="p-3 sm:p-4 text-slate-950 whitespace-nowrap">{order.price}</td>
-                    <td className="p-3 sm:p-4 pr-4 sm:pr-6 whitespace-nowrap">
-                      {/* Tombol badge yang bisa diklik */}
-                      <button 
-                        onClick={() => handleStatusChange(order.id, order.status)}
-                        className="focus:outline-none active:scale-95 transition-transform"
+                  <tr key={order.id} className="hover:bg-gray-50/50">
+                    <td className="py-4 px-4 font-extrabold text-[#E07A2F]">{order.orderId}</td>
+                    <td className="py-4 px-4 text-gray-900">{order.customerName}</td>
+                    <td className="py-4 px-4 text-gray-700">{order.customerClass}</td>
+                    <td className="py-4 px-4 text-gray-700">{order.orderTime} WIB</td>
+                    <td className="py-4 px-4">
+                      <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${
+                        order.status === 'Menunggu Konfirmasi' ? 'bg-orange-100 text-orange-600' :
+                        order.status === 'Sedang Disiapkan' ? 'bg-yellow-100 text-yellow-700' :
+                        order.status === 'Siap Diambil' ? 'bg-blue-100 text-blue-600' :
+                        'bg-green-100 text-green-600'
+                      }`}>
+                        {order.status}
+                      </span>
+                    </td>
+                    <td className="py-4 px-4 text-center">
+                      <button
+                        onClick={() => handleNavigateDetail(order)}
+                        className="p-2 hover:bg-orange-100 text-[#E07A2F] rounded-full transition-colors cursor-pointer inline-flex items-center justify-center"
+                        title="Lihat Detail"
                       >
-                        <StatusBadge status={order.status} />
+                        <ChevronRight className="w-5 h-5 stroke-[2.5]" />
                       </button>
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={6} className="p-8 text-center text-slate-400">
-                    Tidak ada pesanan dengan status "{activeTab}"
-                  </td>
+                  <td colSpan={6} className="py-8 text-center text-gray-400">Tidak ada pesanan.</td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
-
       </div>
     </div>
-  );
-}
-
-function StatusBadge({ status }: { status: OrderStatus }) {
-  if (status === 'Siap Diambil') {
-    return (
-      <span className="px-3 py-1 text-xs font-bold text-green-700 bg-green-100 border border-green-200 rounded-full cursor-pointer hover:bg-green-200 transition-colors inline-block">
-        Siap Diambil
-      </span>
-    );
-  }
-  if (status === 'Sedang Disiapkan') {
-    return (
-      <span className="px-3 py-1 text-xs font-bold text-orange-700 bg-orange-100 border border-orange-200 rounded-full cursor-pointer hover:bg-orange-200 transition-colors inline-block">
-        Sedang Disiapkan
-      </span>
-    );
-  }
-  if (status === 'Selesai') {
-    return (
-      <span className="px-3 py-1 text-xs font-bold text-emerald-700 bg-emerald-100 border border-emerald-200 rounded-full cursor-pointer hover:bg-emerald-200 transition-colors inline-block">
-        Selesai
-      </span>
-    );
-  }
-  return (
-    <span className="px-3 py-1 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full cursor-pointer hover:bg-amber-100 transition-colors inline-block">
-      Menunggu Konfirmasi
-    </span>
   );
 }

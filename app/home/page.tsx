@@ -4,6 +4,61 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Search, Star, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
+// CONFIG STRAPI URL LOKAL TANPA FILE LIB
+const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
+
+// FUNGSI HELPER AMBIL URL GAMBAR STRAPI SECARA LOKAL
+const getImageUrl = (item: any): string => {
+  if (!item) return '';
+
+  // 1. Ambil objek gambar dari berbagai kemungkinan properti field
+  const rawImage =
+    item?.image ||
+    item?.foto ||
+    item?.gambar ||
+    item?.banner ||
+    item?.benner ||
+    item?.cover;
+
+  if (!rawImage) return '';
+
+  // 2. Jika berbentuk string
+  if (typeof rawImage === 'string') {
+    if (rawImage.startsWith('http://') || rawImage.startsWith('https://')) {
+      return rawImage;
+    }
+    return `${STRAPI_URL}${rawImage.startsWith('/') ? '' : '/'}${rawImage}`;
+  }
+
+  // 3. Jika berbentuk objek Strapi v4 / v5
+  const url =
+    rawImage?.data?.attributes?.url ||
+    rawImage?.data?.url ||
+    rawImage?.attributes?.url ||
+    rawImage?.url;
+
+  if (url) {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    return `${STRAPI_URL}${url.startsWith('/') ? '' : '/'}${url}`;
+  }
+
+  // 4. Jika berbentuk Array of Media
+  if (Array.isArray(rawImage?.data) && rawImage.data.length > 0) {
+    const firstImg = rawImage.data[0];
+    const arrayUrl = firstImg?.attributes?.url || firstImg?.url;
+    if (arrayUrl) {
+      if (arrayUrl.startsWith('http://') || arrayUrl.startsWith('https://')) {
+        return arrayUrl;
+      }
+      return `${STRAPI_URL}${arrayUrl.startsWith('/') ? '' : '/'}${arrayUrl}`;
+    }
+  }
+
+  return '';
+};
+
 interface MenuItem {
   id: number;
   documentId?: string;
@@ -43,8 +98,8 @@ export default function HomePage() {
       setLoading(true);
       try {
         const [resMenus, resHomes] = await Promise.all([
-          fetch('http://localhost:1337/api/menus?populate=*&pagination[limit]=1000'),
-          fetch('http://localhost:1337/api/homes?populate=*&pagination[limit]=1000'),
+          fetch(`${STRAPI_URL}/api/menus?populate=*&pagination[limit]=1000`),
+          fetch(`${STRAPI_URL}/api/homes?populate=*&pagination[limit]=1000`),
         ]);
 
         const dataMenus = await resMenus.json();
@@ -98,36 +153,6 @@ export default function HomePage() {
       return tenant.name.toLowerCase().includes(query);
     });
   }, [tenants, searchTerm]);
-
-  // Helper URL Gambar
-  const getImageUrl = (item: any): string => {
-    if (!item) return '/placeholder.jpeg';
-
-    const dataObj = item.attributes || item;
-
-    const media =
-      dataObj.banner ||
-      dataObj.benner ||
-      dataObj.image ||
-      dataObj.foto ||
-      dataObj.gambar ||
-      dataObj.cover;
-
-    if (!media) return '/placeholder.jpeg';
-
-    const target = Array.isArray(media) ? media[0] : media;
-    const nestedTarget = target?.data?.attributes || target?.data || target;
-
-    const rawUrl =
-      nestedTarget?.url ||
-      nestedTarget?.formats?.medium?.url ||
-      nestedTarget?.formats?.small?.url ||
-      nestedTarget?.formats?.thumbnail?.url;
-
-    if (!rawUrl) return '/placeholder.jpeg';
-
-    return rawUrl.startsWith('http') ? rawUrl : `http://localhost:1337${rawUrl}`;
-  };
 
   // Handler Scroll Horizontal
   const handleScroll = (ref: React.RefObject<HTMLDivElement | null>, direction: 'left' | 'right') => {
@@ -193,7 +218,7 @@ export default function HomePage() {
               <div className="relative mt-6">
                 <button 
                   onClick={() => handleScroll(menuScrollRef, 'left')}
-                  className="absolute -left-5 top-1/2 -translate-y-1/2 z-10 flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-xl text-orange-500 border border-gray-100 hover:bg-orange-50 hover:scale-110 transition-all"
+                  className="absolute -left-5 top-1/2 -translate-y-1/2 z-10 flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-xl text-orange-500 border border-gray-100 hover:bg-orange-50 hover:scale-110 transition-all cursor-pointer"
                 >
                   <ChevronLeft size={28} />
                 </button>
@@ -203,53 +228,62 @@ export default function HomePage() {
                   className="flex gap-6 overflow-x-auto scrollbar-hide scroll-smooth py-3 px-1"
                   style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                 >
-                  {displayedMenus.map((menu) => (
-                    <div 
-                      key={menu.id} 
-                      className="flex min-w-[320px] sm:min-w-[420px] flex-shrink-0 items-center gap-4 sm:gap-6 rounded-[32px] border border-gray-100 bg-white p-4 sm:p-5 shadow-sm transition-all hover:shadow-md"
-                    >
-                      <div className="h-28 w-28 sm:h-36 sm:w-36 flex-shrink-0 overflow-hidden rounded-2xl bg-gray-100">
-                        <img 
-                          src={getImageUrl(menu)} 
-                          alt={menu.name || 'Menu'} 
-                          className="h-full w-full object-cover" 
-                        />
-                      </div>
+                  {displayedMenus.map((menu) => {
+                    const menuImgSrc = getImageUrl(menu);
+                    return (
+                      <div 
+                        key={menu.id} 
+                        className="flex min-w-[320px] sm:min-w-[420px] flex-shrink-0 items-center gap-4 sm:gap-6 rounded-[32px] border border-gray-100 bg-white p-4 sm:p-5 shadow-sm transition-all hover:shadow-md"
+                      >
+                        <div className="h-28 w-28 sm:h-36 sm:w-36 flex-shrink-0 overflow-hidden rounded-2xl bg-gray-100">
+                          {menuImgSrc ? (
+                            <img 
+                              src={menuImgSrc} 
+                              alt={menu.name || 'Menu'} 
+                              className="h-full w-full object-cover" 
+                            />
+                          ) : (
+                            <div className="h-full w-full flex items-center justify-center text-xs text-gray-400 bg-gray-50">
+                              No Image
+                            </div>
+                          )}
+                        </div>
 
-                      <div className="flex flex-grow flex-col justify-between py-1 h-full min-w-0">
-                        <div>
-                          <h4 className="text-lg font-serif font-medium text-gray-800 sm:text-xl truncate">
-                            {menu.name}
-                          </h4>
-                          <p className="text-base font-bold text-orange-500 mt-1">
-                            Rp {menu.price ? menu.price.toLocaleString('id-ID') : '0'}
-                          </p>
-                          
-                          <div className="mt-2 flex gap-1">
-                            {[...Array(5)].map((_, i) => (
-                              <Star key={i} size={16} fill="#FFD700" className="text-yellow-400" />
-                            ))}
+                        <div className="flex flex-grow flex-col justify-between py-1 h-full min-w-0">
+                          <div>
+                            <h4 className="text-lg font-serif font-medium text-gray-800 sm:text-xl truncate">
+                              {menu.name}
+                            </h4>
+                            <p className="text-base font-bold text-orange-500 mt-1">
+                              Rp {menu.price ? menu.price.toLocaleString('id-ID') : '0'}
+                            </p>
+                            
+                            <div className="mt-2 flex gap-1">
+                              {[...Array(5)].map((_, i) => (
+                                <Star key={i} size={16} fill="#FFD700" className="text-yellow-400" />
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* TOMBOL PLUS DENGAN IKON WARNA HITAM */}
+                          <div className="flex justify-end mt-3">
+                            <button 
+                              onClick={() => handleGoToMenuDetail(menu)}
+                              className="rounded-2xl bg-orange-500 p-2.5 sm:p-3 text-black shadow-md transition-colors hover:bg-orange-600 active:scale-95 cursor-pointer"
+                              title="Lihat Detail Menu"
+                            >
+                              <Plus size={20} className="text-black" />
+                            </button>
                           </div>
                         </div>
-
-                        {/* TOMBOL PLUS DENGAN IKON WARNA HITAM */}
-                        <div className="flex justify-end mt-3">
-                          <button 
-                            onClick={() => handleGoToMenuDetail(menu)}
-                            className="rounded-2xl bg-orange-500 p-2.5 sm:p-3 text-black shadow-md transition-colors hover:bg-orange-600 active:scale-95"
-                            title="Lihat Detail Menu"
-                          >
-                            <Plus size={20} className="text-black" />
-                          </button>
-                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 <button 
                   onClick={() => handleScroll(menuScrollRef, 'right')}
-                  className="absolute -right-5 top-1/2 -translate-y-1/2 z-10 flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-xl text-orange-500 border border-gray-100 hover:bg-orange-50 hover:scale-110 transition-all"
+                  className="absolute -right-5 top-1/2 -translate-y-1/2 z-10 flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-xl text-orange-500 border border-gray-100 hover:bg-orange-50 hover:scale-110 transition-all cursor-pointer"
                 >
                   <ChevronRight size={28} />
                 </button>
@@ -269,7 +303,7 @@ export default function HomePage() {
               <div className="relative mt-6">
                 <button 
                   onClick={() => handleScroll(storeScrollRef, 'left')}
-                  className="absolute -left-5 top-1/2 -translate-y-1/2 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-lg text-orange-500 border border-gray-100 hover:bg-orange-50 hover:scale-110 transition-all"
+                  className="absolute -left-5 top-1/2 -translate-y-1/2 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-lg text-orange-500 border border-gray-100 hover:bg-orange-50 hover:scale-110 transition-all cursor-pointer"
                 >
                   <ChevronLeft size={24} />
                 </button>
@@ -280,8 +314,8 @@ export default function HomePage() {
                   style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                 >
                   {filteredTenants.map((store) => {
-                    // Penanganan rating agar selalu bernilai 5 jika tidak diisi di Strapi
                     const storeRating = Number(store.rating) > 0 ? Math.floor(Number(store.rating)) : 5;
+                    const storeImgSrc = getImageUrl(store);
 
                     return (
                       <div 
@@ -289,11 +323,17 @@ export default function HomePage() {
                         className="flex w-[240px] sm:w-[260px] flex-shrink-0 flex-col items-center rounded-[28px] border border-gray-100 bg-white p-4 shadow-sm transition-all hover:shadow-md"
                       >
                         <div className="h-36 sm:h-40 w-full overflow-hidden rounded-2xl bg-gray-100">
-                          <img 
-                            src={getImageUrl(store)} 
-                            alt={store.name || 'Toko'} 
-                            className="h-full w-full object-cover" 
-                          />
+                          {storeImgSrc ? (
+                            <img 
+                              src={storeImgSrc} 
+                              alt={store.name || 'Toko'} 
+                              className="h-full w-full object-cover" 
+                            />
+                          ) : (
+                            <div className="h-full w-full flex items-center justify-center text-xs text-gray-400 bg-gray-50">
+                              No Image
+                            </div>
+                          )}
                         </div>
 
                         <div className="mt-3 text-center w-full">
@@ -301,7 +341,7 @@ export default function HomePage() {
                             {store.name || 'Nama Toko'}
                           </h4>
                           
-                          {/* Rating Bintang Toko (Default 5 Bintang) */}
+                          {/* Rating Bintang Toko */}
                           <div className="mt-1 flex justify-center gap-0.5">
                             {[...Array(storeRating)].map((_, i) => (
                               <Star key={i} size={15} fill="#FFD700" className="text-yellow-400" />
@@ -310,7 +350,7 @@ export default function HomePage() {
 
                           <button 
                             onClick={() => handleGoToTenantDetail(store)}
-                            className="mt-4 w-full rounded-xl bg-orange-500 py-2.5 text-xs sm:text-sm font-medium text-white shadow-sm transition-colors hover:bg-orange-600 active:scale-95"
+                            className="mt-4 w-full rounded-xl bg-orange-500 py-2.5 text-xs sm:text-sm font-medium text-white shadow-sm transition-colors hover:bg-orange-600 active:scale-95 cursor-pointer"
                           >
                             Lihat Menu
                           </button>
@@ -322,7 +362,7 @@ export default function HomePage() {
 
                 <button 
                   onClick={() => handleScroll(storeScrollRef, 'right')}
-                  className="absolute -right-5 top-1/2 -translate-y-1/2 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-lg text-orange-500 border border-gray-100 hover:bg-orange-50 hover:scale-110 transition-all"
+                  className="absolute -right-5 top-1/2 -translate-y-1/2 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-lg text-orange-500 border border-gray-100 hover:bg-orange-50 hover:scale-110 transition-all cursor-pointer"
                 >
                   <ChevronRight size={24} />
                 </button>

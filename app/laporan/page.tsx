@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 
@@ -35,19 +36,17 @@ export default function LaporanPage() {
   );
 
   return (
-    <div className="min-h-screen w-full bg-[#F5F5F5] flex flex-col">
-      <div className="flex-1 w-full max-w-5xl mx-auto px-4 py-5 sm:px-8 sm:py-8 flex flex-col">
-
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-5 sm:mb-8 shrink-0">
-          <button
-            type="button"
-            onClick={() => router.push('/dasboard-admin')}
-            aria-label="Kembali ke dashboard admin"
-            className="p-2 -ml-2 rounded-lg hover:bg-gray-200 transition-colors shrink-0"
+    <div className="min-h-screen bg-slate-50 p-10 font-sans text-slate-800">
+      <div className="mx-auto bg-white border border-slate-100 rounded-3xl p-8 shadow-sm">
+        
+        {/* Header Section */}
+        <div className="flex items-center gap-4 mb-8">
+          <Link 
+            href="/dasboard-admin" 
+            className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-700"
           >
             <ArrowLeft className="w-6 h-6 sm:w-7 sm:h-7 text-black" />
-          </button>
+          </Link>
           <h1 className="text-2xl sm:text-3xl font-bold text-black">Laporan</h1>
         </div>
 

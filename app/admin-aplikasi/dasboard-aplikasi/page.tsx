@@ -13,6 +13,10 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
+// CONFIG STRAPI URL & TOKEN
+const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
+const API_TOKEN = process.env.NEXT_PUBLIC_STRAPI_API_TOKEN;
+
 export default function Dashboard() {
   // 1. State untuk menampung total pengguna dari Strapi
   const [totalUsers, setTotalUsers] = useState<number>(0);
@@ -21,27 +25,57 @@ export default function Dashboard() {
   // 2. State untuk menu toggle responsif (Layar HP)
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
 
-  const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
+  // Helper untuk mengambil Token secara aman (tidak pernah mengirim token 'undefined' / 'null')
+  const getAuthToken = () => {
+    if (API_TOKEN && API_TOKEN !== 'undefined') return API_TOKEN;
+    if (typeof window !== 'undefined') {
+      const localToken = localStorage.getItem('token');
+      if (localToken && localToken !== 'null' && localToken !== 'undefined') {
+        return localToken;
+      }
+    }
+    return null;
+  };
 
   // 3. Fetch data pengguna dari API Strapi
   useEffect(() => {
     const fetchTotalUsers = async () => {
       try {
         setLoadingUsers(true);
-        const res = await fetch(`${STRAPI_URL}/api/users`);
-        if (!res.ok) throw new Error('Gagal mengambil data user');
-        
+        const activeToken = getAuthToken();
+
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+
+        if (activeToken) {
+          headers['Authorization'] = `Bearer ${activeToken}`;
+        }
+
+        const res = await fetch(`${STRAPI_URL}/api/users`, {
+          method: 'GET',
+          headers,
+        });
+
+        // HILANGKAN 'throw new Error' AGAR TIDAK POP-UP EROR MERAH
+        if (!res.ok) {
+          console.warn('Strapi menolak request fetch total users. Status:', res.status);
+          setTotalUsers(0);
+          return;
+        }
+
         const data = await res.json();
-        setTotalUsers(data.length);
+        setTotalUsers(Array.isArray(data) ? data.length : 0);
       } catch (error) {
         console.error('Error fetching total users:', error);
+        setTotalUsers(0);
       } finally {
         setLoadingUsers(false);
       }
     };
 
     fetchTotalUsers();
-  }, [STRAPI_URL]);
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-100 p-4 sm:p-6 lg:p-8 text-slate-800 font-sans">
@@ -64,7 +98,7 @@ export default function Dashboard() {
 
         <button 
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          className="p-2.5 bg-slate-50 text-slate-700 rounded-xl hover:bg-slate-100 transition-colors border border-slate-100"
+          className="p-2.5 bg-slate-50 text-slate-700 rounded-xl hover:bg-slate-100 transition-colors border border-slate-100 cursor-pointer"
           aria-label="Toggle Navigation Menu"
         >
           {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
@@ -106,7 +140,7 @@ export default function Dashboard() {
               </div>
               <button 
                 onClick={() => setIsSidebarOpen(false)}
-                className="lg:hidden text-slate-400 hover:text-slate-600"
+                className="lg:hidden text-slate-400 hover:text-slate-600 cursor-pointer"
               >
                 <X size={20} />
               </button>
@@ -126,7 +160,7 @@ export default function Dashboard() {
             {/* Navigation Menu */}
             <nav className="flex flex-col gap-3">
               <Link
-                href="/dasboard-admin"
+                href="/admin-aplikasi/dasboard-aplikasi"
                 onClick={() => setIsSidebarOpen(false)}
                 className="flex w-full items-center justify-center gap-2 rounded-full border border-orange-200 bg-orange-50 py-2.5 font-semibold text-orange-500 shadow-sm transition-colors hover:bg-orange-100"
               >
@@ -164,7 +198,7 @@ export default function Dashboard() {
           </div>
 
           {/* Logout Button */}
-          <button className="flex items-center gap-3 font-semibold text-slate-700 hover:text-red-500 transition-colors px-2 py-2 mt-6">
+          <button className="flex items-center gap-3 font-semibold text-slate-700 hover:text-red-500 transition-colors px-2 py-2 mt-6 cursor-pointer">
             <LogOut className="h-5 w-5" />
             <span>Keluar</span>
           </button>
@@ -219,7 +253,7 @@ export default function Dashboard() {
             <div className="lg:col-span-2 rounded-2xl border border-slate-200 p-4 bg-white shadow-sm">
               <div className="mb-4 flex items-center justify-between">
                 <h3 className="text-sm font-bold text-slate-800">Grafik Pesanan</h3>
-                <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">
+                <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600 cursor-pointer">
                   <span>7 Hari Lalu</span>
                   <ChevronDown className="h-3 w-3" />
                 </div>
@@ -290,7 +324,7 @@ export default function Dashboard() {
               <h3 className="text-sm font-bold text-slate-800">Pesanan Terbaru</h3>
               <Link 
                 href="/admin-aplikasi/pesanan"
-                className="rounded-full bg-orange-500 px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-orange-600"
+                className="rounded-full bg-orange-500 px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-orange-600 cursor-pointer"
               >
                 Lihat Semua
               </Link>

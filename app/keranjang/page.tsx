@@ -1,15 +1,16 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ArrowLeft, Home, Trash2, Clock, Calendar, ChevronDown, DollarSign, Plus, Minus } from 'lucide-react';
+import { ArrowLeft, Home, Trash2, Clock, Calendar, ChevronDown, DollarSign, Plus, Minus, FileText } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCart } from '@/app/context/CartContext';
+
+const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
 
 export default function KeranjangPage() {
   const router = useRouter();
   const {
     cartItems,
-    removeFromCart,
     updateQuantity,
     toggleSelectItem,
     toggleSelectAll,
@@ -18,11 +19,8 @@ export default function KeranjangPage() {
     selectedItems,
   } = useCart();
 
-  // Tanggal Hari Ini sebagai Default (Format YYYY-MM-DD untuk Strapi Date)
   const todayStr = new Date().toISOString().split('T')[0];
   const [pickupDate, setPickupDate] = useState<string>(todayStr);
-  
-  // Jam Pengambilan (Short Text di Strapi)
   const [pickupTime, setPickupTime] = useState<string>('06.15 WIB');
   const [paymentMethod, setPaymentMethod] = useState<string>('Cash');
   const [loading, setLoading] = useState<boolean>(false);
@@ -42,7 +40,6 @@ export default function KeranjangPage() {
   const allSelected = cartItems.length > 0 && cartItems.every((item) => item.selected ?? true);
   const hasSelected = selectedItems.length > 0;
 
-  // FUNGSI UTAMA BUAT PESANAN
   const handleCreateOrder = async () => {
     if (!hasSelected) {
       alert('Pilih minimal satu makanan terlebih dahulu!');
@@ -50,112 +47,129 @@ export default function KeranjangPage() {
     }
     setLoading(true);
 
-    const cleanItems = selectedItems.map((item: any) => ({
-      id: String(item.id),
-      name: String(item.name || item.nama || 'Makanan'),
-      price: Number(item.price || item.harga || 0),
-      quantity: Number(item.quantity || item.qty || 1),
-    }));
+    // 1. Ambil Data Pelanggan yang Login
+    const userLocal = JSON.parse(
+      localStorage.getItem('user') || localStorage.getItem('smart_canteen_user') || '{}'
+    );
+    const namaPelanggan = userLocal.username || userLocal.nama || 'Siswa Pelanggan';
 
-    const totalHargaMurni = cleanItems.reduce(
-      (sum: number, item: any) => sum + item.price * item.quantity,
+    // 2. Hitung Total Price
+    const totalHarga = selectedItems.reduce(
+      (sum: number, item: any) => sum + Number(item.price || 0) * Number(item.quantity || 1),
       0
     );
 
+    // 3. Generate Unik order_id
     const generatedOrderId = `#SC${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
 
-    // 1. Data untuk Simpan di LocalStorage (Untuk Tampilan Halaman Status Pesanan)
+    // 4. Format Items Lengkap untuk LocalStorage & Component Strapi
+    const localItems = selectedItems.map((item: any) => ({
+      id: String(item.id),
+      name: String(item.name || item.nama || 'Makanan'),
+      nama: String(item.name || item.nama || 'Makanan'),
+      price: Number(item.price || item.harga || 0),
+      harga: Number(item.price || item.harga || 0),
+      quantity: Number(item.quantity || item.qty || 1),
+      qty: Number(item.quantity || item.qty || 1),
+      image: item.image || item.gambar || '',
+      gambar: item.image || item.gambar || '',
+      notes: item.notes || item.note || '',
+      note: item.notes || item.note || '',
+    }));
+
+    const strapiItemsComponent = selectedItems.map((item: any) => {
+      const rawMenuId = item.id || item.documentId;
+      const numMenuId = Number(rawMenuId);
+
+      return {
+        name: String(item.name || item.nama || 'Makanan'),
+        price: Number(item.price || item.harga || 0),
+        quantity: Number(item.quantity || item.qty || 1),
+        notes: String(item.notes || item.note || ''),
+        menu: isNaN(numMenuId) ? rawMenuId : numMenuId,
+      };
+    });
+
+    // 5. Payload Strapi
+    const strapiPayload = {
+      data: {
+        order_id: generatedOrderId,
+        customer_name: namaPelanggan,
+        payment_method: paymentMethod.toLowerCase() === 'cash' ? 'cash' : 'saldo_digital',
+        total_price: totalHarga,
+        menu_status: 'pending',
+        payment_status: 'Tertunda',
+        pickup_time: pickupTime,
+        pickup_date: pickupDate,
+        items: strapiItemsComponent,
+      },
+    };
+
+    // 6. Data Pesanan Lokal
     const pesananLokal = {
       orderId: generatedOrderId,
+      order_id: generatedOrderId,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       status: 'Menunggu Konfirmasi',
-      items: cleanItems,
-      totalPrice: totalHargaMurni,
+      menu_status: 'pending',
+      customer_name: namaPelanggan,
+      items: localItems,
+      totalPrice: totalHarga,
+      total_price: totalHarga,
       pickupDate: pickupDate,
       pickupTime: pickupTime,
       paymentMethod: paymentMethod,
     };
 
+    // Simpan ke LocalStorage
     const dataLama = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
-    dataLama.push(pesananLokal);
+    dataLama.unshift(pesananLokal);
     localStorage.setItem('smart_canteen_orders', JSON.stringify(dataLama));
 
-    // 2. Payload Khusus Strapi (Sesuaikan persis dengan aturan Enum Strapi)
-    const strapiPayload = {
-      order_id: generatedOrderId,
-      total_price: totalHargaMurni,
-      pickup_date: pickupDate,
-      pickup_time: pickupTime,
-      // Mengirim 'cash' atau 'saldo_digital' sesuai pilihan Enum di Strapi
-      payment_method: paymentMethod.toLowerCase() === 'cash' ? 'cash' : 'saldo_digital',
-      // Mengirim 'pending' sesuai pilihan Enum di Strapi
-      menu_status: 'pending',
-    };
-
+    // 7. Kirim ke Strapi Backend (jika online)
     try {
-      console.log('📤 Mengirim ke Strapi:', strapiPayload);
-
-      const res = await fetch('http://localhost:1337/api/orders', {
+      const response = await fetch(`${STRAPI_URL}/api/orders`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json' 
+        headers: {
+          'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ data: strapiPayload }),
+        body: JSON.stringify(strapiPayload),
       });
 
-      const resData = await res.json();
+      const resJson = await response.json();
 
-      if (res.ok) {
-        console.log('✅ SUKSES! Pesanan berhasil masuk ke Strapi:', resData);
+      if (response.ok) {
+        console.log('✅ Pesanan berhasil tersimpan di Strapi:', resJson);
       } else {
-        console.error('❌ STRAPI ERROR DETAILS:', JSON.stringify(resData.error, null, 2));
+        console.warn('⚠️ Strapi menolak format data, pesanan tetap tersimpan di lokal:', resJson);
       }
     } catch (err) {
-      console.warn('⚠️ Server Strapi offline, data tersimpan lokal:', err);
+      console.warn('⚠️ Server Strapi offline, pesanan tersimpan lokal:', err);
+    } finally {
+      clearSelectedItems();
+      setLoading(false);
+      router.push('/status-pesanan');
     }
-
-    clearSelectedItems();
-    setLoading(false);
-    router.push('/status-pesanan');
   };
 
   return (
-    <div className="w-full min-h-screen bg-blue-600 font-sans text-gray-900 flex flex-col justify-between p-3 sm:p-6 md:p-8 transition-all duration-300">
-      
-      {/* KONTEN UTAMA IN CARD */}
-      <div className="max-w-4xl mx-auto w-full bg-white/95 backdrop-blur-md border border-blue-100 rounded-2xl sm:rounded-3xl p-4 sm:p-8 shadow-2xl space-y-6 pb-28 mb-4">
+    <div className="w-full min-h-screen bg-white font-sans text-gray-900 flex flex-col justify-between">
+      <div className="w-full py-6 px-4 sm:px-8 space-y-6 pb-28">
         
-        {/* HEADER ATAS */}
+        {/* HEADER */}
         <div className="flex items-center justify-between pb-4 border-b border-gray-100">
-          <button
-            onClick={() => router.back()}
-            className="text-gray-700 hover:text-blue-600 hover:bg-blue-50 transition-colors p-2 rounded-full -ml-2"
-            aria-label="Kembali"
-          >
-            <ArrowLeft size={24} />
+          <button onClick={() => router.back()} className="text-gray-900 hover:text-orange-500 transition-colors p-1 -ml-1 cursor-pointer">
+            <ArrowLeft size={26} />
           </button>
-
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight">
-            Keranjang
-          </h1>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => router.push('/home')}
-              className="text-gray-700 hover:text-blue-600 hover:bg-blue-50 transition-colors p-2 rounded-full"
-              aria-label="Home"
-            >
-              <Home size={22} />
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight">Keranjang</h1>
+          <div className="flex items-center gap-3">
+            <button onClick={() => router.push('/home')} className="text-gray-900 hover:text-orange-500 transition-colors p-1 cursor-pointer">
+              <Home size={24} />
             </button>
             {cartItems.length > 0 && (
-              <button
-                onClick={clearCart}
-                className="text-gray-700 hover:text-red-500 hover:bg-red-50 transition-colors p-2 rounded-full"
-                title="Kosongkan Keranjang"
-                aria-label="Kosongkan Keranjang"
-              >
-                <Trash2 size={22} />
+              <button onClick={clearCart} className="text-gray-900 hover:text-red-500 transition-colors p-1 cursor-pointer" title="Kosongkan Keranjang">
+                <Trash2 size={24} />
               </button>
             )}
           </div>
@@ -163,221 +177,115 @@ export default function KeranjangPage() {
 
         {cartItems.length > 0 ? (
           <div className="space-y-6 pt-2">
-            
-            {/* OPSI PILIH SEMUA */}
-            <div className="flex items-center justify-between bg-blue-50/60 px-4 py-3 rounded-2xl border border-blue-100">
+            <div className="flex items-center justify-between bg-gray-50 px-4 py-3 rounded-2xl border border-gray-100">
               <label className="flex items-center gap-3 cursor-pointer font-semibold text-sm sm:text-base text-gray-800">
-                <input
-                  type="checkbox"
-                  checked={allSelected}
-                  onChange={toggleSelectAll}
-                  className="w-5 h-5 accent-blue-600 rounded cursor-pointer"
-                />
+                <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="w-5 h-5 accent-[#52C453] rounded cursor-pointer" />
                 Pilih Semua ({cartItems.length} Makanan)
               </label>
-              <span className="text-xs sm:text-sm text-blue-700 font-medium">
-                {selectedItems.length} Terpilih
-              </span>
+              <span className="text-xs sm:text-sm text-gray-400">{selectedItems.length} Terpilih</span>
             </div>
 
-            {/* DAFTAR ITEM KERANJANG */}
+            {/* DAFTAR ITEM */}
             <div className="bg-white border border-gray-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-5">
               {cartItems.map((item) => {
                 const isChecked = item.selected ?? true;
                 const itemSubtotal = Number(item.price || 0) * Number(item.quantity || 1);
+                const itemNote = item.notes || item.note;
 
                 return (
-                  <div
-                    key={item.id}
-                    className="flex items-center justify-between gap-3 sm:gap-4 pb-5 border-b border-gray-100 last:border-none last:pb-0"
-                  >
-                    <div className="flex items-center gap-3 sm:gap-5 min-w-0 flex-1">
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => toggleSelectItem(item.id)}
-                        className="w-5 h-5 accent-blue-600 rounded cursor-pointer shrink-0"
-                      />
-
-                      <img
-                        src={item.image || '/placeholder.jpeg'}
-                        alt={item.name}
-                        className="h-20 w-24 sm:h-24 sm:w-32 rounded-2xl object-cover bg-gray-100 shrink-0"
-                      />
-
-                      <div className="min-w-0 space-y-1">
-                        <h3 className="font-bold text-gray-900 text-base sm:text-lg truncate">
-                          {item.name}
-                        </h3>
-                        
-                        <div className="flex items-center gap-4 text-gray-800 font-medium text-sm sm:text-base">
-                          <span className="font-bold text-black">{item.quantity}</span>
-                          <span>Rp {Number(item.price || 0).toLocaleString('id-ID')}</span>
+                  <div key={item.id} className="flex flex-col gap-2 pb-5 border-b border-gray-100 last:border-none last:pb-0">
+                    <div className="flex items-center justify-between gap-3 sm:gap-4">
+                      <div className="flex items-center gap-3 sm:gap-5 min-w-0 flex-1">
+                        <input type="checkbox" checked={isChecked} onChange={() => toggleSelectItem(item.id)} className="w-5 h-5 accent-[#52C453] rounded cursor-pointer shrink-0" />
+                        <img src={item.image || 'https://via.placeholder.com/150?text=Makanan'} alt={item.name} className="h-20 w-24 sm:h-24 sm:w-32 rounded-2xl object-cover bg-gray-100 shrink-0" />
+                        <div className="min-w-0 space-y-1">
+                          <h3 className="font-bold text-gray-900 text-base sm:text-lg truncate">{item.name}</h3>
+                          <div className="flex items-center gap-4 text-gray-800 font-medium text-sm sm:text-base">
+                            <span className="font-bold text-black">{item.quantity}</span>
+                            <span>Rp {Number(item.price || 0).toLocaleString('id-ID')}</span>
+                          </div>
                         </div>
+                      </div>
 
-                        {item.note && (
-                          <p className="text-xs text-orange-600 bg-orange-50 px-2 py-0.5 rounded italic inline-block">
-                            Catatan: {item.note}
-                          </p>
-                        )}
+                      <div className="flex flex-col items-end gap-3 shrink-0">
+                        <span className="text-base sm:text-lg font-bold text-[#F28728]">Rp {itemSubtotal.toLocaleString('id-ID')}</span>
+                        <div className="flex items-center bg-gray-100 rounded-xl px-2.5 py-1 gap-2 border border-gray-200">
+                          <button onClick={() => updateQuantity(item.id, -1)} className="p-0.5 text-gray-700 hover:text-black font-bold transition-colors cursor-pointer"><Minus size={13} /></button>
+                          <span className="font-bold text-xs sm:text-sm px-1.5 text-gray-900">{item.quantity}</span>
+                          <button onClick={() => updateQuantity(item.id, 1)} className="p-0.5 text-gray-700 hover:text-black font-bold transition-colors cursor-pointer"><Plus size={13} /></button>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="flex flex-col items-end gap-3 shrink-0">
-                      <span className="text-base sm:text-lg font-bold text-blue-600">
-                        Rp {itemSubtotal.toLocaleString('id-ID')}
-                      </span>
-
-                      <div className="flex items-center bg-blue-50/70 rounded-xl px-2.5 py-1 gap-2 border border-blue-100">
-                        <button
-                          onClick={() => updateQuantity(item.id, -1)}
-                          className="p-0.5 text-gray-700 hover:text-blue-700 font-bold transition-colors"
-                        >
-                          <Minus size={13} />
-                        </button>
-                        <span className="font-bold text-xs sm:text-sm px-1.5 text-gray-900">
-                          {item.quantity}
-                        </span>
-                        <button
-                          onClick={() => updateQuantity(item.id, 1)}
-                          className="p-0.5 text-gray-700 hover:text-blue-700 font-bold transition-colors"
-                        >
-                          <Plus size={13} />
-                        </button>
+                    {/* MENAMPILKAN CATATAN JIKA ADA */}
+                    {itemNote && (
+                      <div className="ml-8 sm:ml-10 flex items-center gap-1.5 text-xs sm:text-sm text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100 w-fit">
+                        <FileText size={14} className="text-gray-400 shrink-0" />
+                        <span>Catatan: <strong className="text-gray-700">{itemNote}</strong></span>
                       </div>
-                    </div>
+                    )}
                   </div>
                 );
               })}
             </div>
 
-            {/* OPSI PENGAMBILAN & PEMBAYARAN */}
             {hasSelected && (
               <div className="space-y-6 pt-2 transition-all">
-                
-                {/* 1. TANGGAL PENGAMBILAN */}
                 <div className="space-y-2">
-                  <label className="text-sm sm:text-base font-semibold text-gray-900 block">
-                    Tanggal Pengambilan
-                  </label>
+                  <label className="text-sm sm:text-base font-semibold text-gray-900 block">Tanggal Pengambilan</label>
                   <div className="relative">
-                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-800 pointer-events-none">
-                      <Calendar size={20} />
-                    </div>
-                    <input
-                      type="date"
-                      min={todayStr}
-                      value={pickupDate}
-                      onChange={(e) => setPickupDate(e.target.value)}
-                      className="w-full bg-white border border-gray-300 rounded-2xl pl-12 pr-4 py-3.5 text-sm sm:text-base font-medium text-gray-900 outline-none focus:border-blue-500 cursor-pointer shadow-sm"
-                    />
+                    <Calendar size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-800 pointer-events-none" />
+                    <input type="date" min={todayStr} value={pickupDate} onChange={(e) => setPickupDate(e.target.value)} className="w-full bg-[#FAFAFA] border border-gray-300 rounded-2xl pl-12 pr-4 py-3.5 text-sm sm:text-base font-medium text-gray-900 outline-none focus:border-green-500 cursor-pointer shadow-sm" />
                   </div>
                 </div>
 
-                {/* 2. JAM PENGAMBILAN */}
                 <div className="space-y-2">
-                  <label className="text-sm sm:text-base font-semibold text-gray-900 block">
-                    Jam Pengambilan
-                  </label>
+                  <label className="text-sm sm:text-base font-semibold text-gray-900 block">Jam Pengambilan</label>
                   <div className="relative">
-                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-800 pointer-events-none">
-                      <Clock size={20} />
-                    </div>
-                    <select
-                      value={pickupTime}
-                      onChange={(e) => setPickupTime(e.target.value)}
-                      className="w-full bg-white border border-gray-300 rounded-2xl pl-12 pr-10 py-3.5 text-sm sm:text-base font-medium text-gray-900 outline-none appearance-none focus:border-blue-500 cursor-pointer shadow-sm"
-                    >
-                      {timeSlots.map((slot, index) => (
-                        <option key={index} value={slot} className="text-gray-900">
-                          {slot}
-                        </option>
-                      ))}
+                    <Clock size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-800 pointer-events-none" />
+                    <select value={pickupTime} onChange={(e) => setPickupTime(e.target.value)} className="w-full bg-[#FAFAFA] border border-gray-300 rounded-2xl pl-12 pr-10 py-3.5 text-sm sm:text-base font-medium text-gray-900 outline-none appearance-none focus:border-green-500 cursor-pointer shadow-sm">
+                      {timeSlots.map((slot, index) => <option key={index} value={slot}>{slot}</option>)}
                     </select>
-                    <div className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-800 pointer-events-none">
-                      <ChevronDown size={20} />
-                    </div>
+                    <ChevronDown size={20} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-800 pointer-events-none" />
                   </div>
                 </div>
 
-                {/* 3. METODE PEMBAYARAN */}
                 <div className="space-y-2">
-                  <label className="text-sm sm:text-base font-semibold text-gray-900 block">
-                    Metode Pembayaran
-                  </label>
+                  <label className="text-sm sm:text-base font-semibold text-gray-900 block">Metode Pembayaran</label>
                   <div className="relative">
                     <div className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
-                      <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center">
+                      <div className="w-5 h-5 rounded-full bg-gray-900 text-white flex items-center justify-center">
                         <DollarSign size={13} className="stroke-[3]" />
                       </div>
                     </div>
-                    <select
-                      value={paymentMethod}
-                      onChange={(e) => setPaymentMethod(e.target.value)}
-                      className="w-full bg-white border border-gray-300 rounded-2xl pl-12 pr-10 py-3.5 text-sm sm:text-base font-medium text-gray-900 outline-none appearance-none focus:border-blue-500 cursor-pointer shadow-sm"
-                    >
-                      <option value="Cash" className="text-gray-900">
-                        Cash
-                      </option>
-                      <option value="Saldo Digital" className="text-gray-900">
-                        Saldo Digital
-                      </option>
+                    <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="w-full bg-[#FAFAFA] border border-gray-300 rounded-2xl pl-12 pr-10 py-3.5 text-sm sm:text-base font-medium text-gray-900 outline-none appearance-none focus:border-green-500 cursor-pointer shadow-sm">
+                      <option value="Cash">Cash</option>
+                      <option value="Saldo Digital">Saldo Digital</option>
                     </select>
-                    <div className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-800 pointer-events-none">
-                      <ChevronDown size={20} />
-                    </div>
+                    <ChevronDown size={20} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-800 pointer-events-none" />
                   </div>
                 </div>
 
-                {/* BANNER PERINGATAN */}
-                <div className="flex items-center gap-3 bg-blue-50/80 border border-blue-100 rounded-2xl px-5 py-3.5 w-full">
-                  <svg
-                    className="w-6 h-6 text-blue-600 shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle cx="12" cy="12" r="9" />
-                    <line x1="12" y1="8" x2="12" y2="12" strokeWidth="1.8" strokeLinecap="round" />
-                    <line x1="12" y1="15.5" x2="12" y2="16" strokeWidth="2.5" strokeLinecap="round" />
-                  </svg>
-                  <p className="text-xs sm:text-sm text-blue-900 font-semibold leading-relaxed">
-                    Apakah anda yakin pesanan anda sudah benar? Mohon untuk cek kembali pesanan anda.
-                  </p>
-                </div>
               </div>
             )}
-
           </div>
         ) : (
           <div className="py-20 text-center text-gray-400">
             <p className="text-base font-medium">Keranjang kamu masih kosong.</p>
-            <button
-              onClick={() => router.push('/home')}
-              className="mt-4 rounded-xl bg-blue-600 px-6 py-2.5 text-white font-bold text-sm hover:bg-blue-700 transition-all shadow-sm"
-            >
+            <button onClick={() => router.push('/home')} className="mt-4 rounded-xl bg-[#52C453] px-6 py-2.5 text-white font-bold text-sm hover:bg-[#43b044] transition-all shadow-sm cursor-pointer">
               Cari Makanan
             </button>
           </div>
         )}
       </div>
 
-      {/* STICKY BOTTOM BAR */}
       {cartItems.length > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-blue-100 px-4 sm:px-8 py-3 shadow-2xl z-50">
-          <div className="max-w-4xl mx-auto">
-            <button
-              onClick={handleCreateOrder}
-              disabled={loading}
-              className="w-full rounded-2xl bg-blue-600 hover:bg-blue-700 py-4 font-bold text-white text-base sm:text-lg transition-all active:scale-[0.99] text-center cursor-pointer shadow-md"
-            >
-              {loading ? 'Memproses Pesanan...' : 'Buat Pesanan'}
-            </button>
-          </div>
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 sm:px-8 py-3 shadow-lg z-50">
+          <button onClick={handleCreateOrder} disabled={loading} className="w-full rounded-2xl bg-[#52C453] hover:bg-[#43b044] py-4 font-bold text-white text-base sm:text-lg transition-all active:scale-[0.99] text-center cursor-pointer shadow-sm disabled:opacity-50">
+            {loading ? 'Memproses Pesanan...' : 'Buat Pesanan'}
+          </button>
         </div>
       )}
-
     </div>
   );
 }

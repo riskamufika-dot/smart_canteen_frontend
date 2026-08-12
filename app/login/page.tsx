@@ -30,7 +30,7 @@ export default function AuthPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            username: `${fullName} (${kelas})`, // Hasil: "imelda novianti (XII PPLG 4)"
+            username: `${fullName} (${kelas})`,
             email: email,
             password: password,
           }),
@@ -60,7 +60,7 @@ export default function AuthPage() {
         localStorage.setItem('user', JSON.stringify(data.user));
 
         alert('Login berhasil!');
-        router.push('/dashboard-pelanggan'); // Arahkan ke halaman utama pelanggan
+        router.push('/home');
       }
     } catch (err: any) {
       setErrorMsg(err.message);
@@ -70,22 +70,22 @@ export default function AuthPage() {
   };
 
   return (
-    <div 
+    <div
       className="flex min-h-screen items-center justify-center bg-cover bg-center p-4 sm:p-6"
-      style={{ backgroundImage: "url('/kantin.jpeg')" }} 
+      style={{ backgroundImage: "url('/kantin.jpeg')" }}
     >
       {/* Background Overlay Hitam untuk Kontras Layar */}
       <div className="absolute inset-0 bg-black/30 backdrop-blur-xs" />
 
       {/* Main Auth Card */}
       <div className="relative z-10 w-full max-w-sm sm:max-w-md rounded-3xl bg-black/50 p-6 sm:p-8 backdrop-blur-md text-white shadow-2xl border border-white/20">
-        
+
         {/* Logo & Header */}
         <div className="text-center mb-6">
           <div className="mx-auto mb-3 flex justify-center">
-            <img 
-              src="/logo.png" 
-              alt="Logo Smart Canteen" 
+            <img
+              src="/logo.png"
+              alt="Logo Smart Canteen"
               className="h-20 w-20 sm:h-24 sm:w-24 object-contain rounded-2xl drop-shadow-md"
               onError={(e) => {
                 (e.target as HTMLElement).style.display = 'none';
@@ -176,12 +176,12 @@ export default function AuthPage() {
           {isSignUp ? (
             <p>
               Already have an account?{' '}
-              <button 
+              <button
                 type="button"
                 onClick={() => {
                   setErrorMsg('');
                   setIsSignUp(false);
-                }} 
+                }}
                 className="font-semibold text-orange-400 hover:underline inline-block"
               >
                 Login
@@ -190,12 +190,12 @@ export default function AuthPage() {
           ) : (
             <p>
               Don't Have an Account?{' '}
-              <button 
+              <button
                 type="button"
                 onClick={() => {
                   setErrorMsg('');
                   setIsSignUp(true);
-                }} 
+                }}
                 className="font-semibold text-orange-400 hover:underline inline-block"
               >
                 Sign Up

@@ -1,299 +1,373 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { LayoutDashboard, ClipboardList, Utensils, BarChart2, Menu, X } from 'lucide-react';
+import { Menu, X, ChevronRight, LogOut } from 'lucide-react';
 
-type StatusPesanan = 'Menunggu Konfirmasi' | 'Sedang Disiapkan' | 'Siap Diambil';
+const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
+
+type StatusPesanan = 'Menunggu Konfirmasi' | 'Sedang Disiapkan' | 'Siap Diambil' | 'Selesai';
 
 interface Pesanan {
   id: string;
+  strapiId: number | string;
   namaSiswa: string;
   waktu: string;
   status: StatusPesanan;
+  totalPrice: number;
 }
 
 export default function DashboardAdmin() {
   const router = useRouter();
 
-  // State buat buka/tutup sidebar di mobile
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  // 1. State Tanggal Otomatis (Real-time Hari Ini)
   const [currentDate, setCurrentDate] = useState<string>('');
+  const [allOrders, setAllOrders] = useState<Pesanan[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  // State Profil Penjual
+  const [userData, setUserData] = useState<{ username: string; nama?: string } | null>(null);
+
+  // FETCH DATA PROFIL PENJUAL DARI LOCALSTORAGE / STRAPI
+  useEffect(() => {
+    const fetchUserProfile = async () => {
+      const savedUser = localStorage.getItem('user');
+      const jwt = localStorage.getItem('jwt');
+
+      if (savedUser) {
+        try {
+          setUserData(JSON.parse(savedUser));
+        } catch (e) {
+          console.error('Error parse user storage:', e);
+        }
+      }
+
+      if (jwt) {
+        try {
+          const res = await fetch(`${STRAPI_URL}/api/users/me`, {
+            headers: { Authorization: `Bearer ${jwt}` },
+          });
+          if (res.ok) {
+            const userJson = await res.json();
+            setUserData(userJson);
+            localStorage.setItem('user', JSON.stringify(userJson));
+          }
+        } catch (err) {
+          console.error('Gagal fetch profil user:', err);
+        }
+      }
+    };
+
+    fetchUserProfile();
+  }, []);
+
+  const namaPenjual = userData?.nama || userData?.username || 'Admin';
+  const inisialPenjual = namaPenjual.charAt(0).toUpperCase();
+
+  // FETCH DATA PESANAN DARI STRAPI & LOCALSTORAGE WITH DEEP POPULATE
+  const fetchOrdersFromStrapi = async (isBackgroundFetch = false) => {
+    if (!isBackgroundFetch) setLoading(true);
+    try {
+      const res = await fetch(`${STRAPI_URL}/api/orders?sort[0]=createdAt:desc&populate[items][populate]=*`);
+
+      if (res.ok) {
+        const result = await res.json();
+        const rawData = result.data || [];
+
+        const formattedOrders: Pesanan[] = rawData.map((item: any) => {
+          const attr = item.attributes ? { ...item.attributes, id: item.id } : item;
+          const userAttr = attr.users_permissions_user?.data?.attributes || attr.user || {};
+
+          const createdAtDate = new Date(attr.createdAt || new Date());
+          const waktuFormatted = createdAtDate
+            .toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+            .replace('.', ':');
+
+          let normStatus: StatusPesanan = 'Menunggu Konfirmasi';
+          const rawStatus = (attr.menu_status || attr.status || attr.order_status || '').toLowerCase();
+
+          if (rawStatus.includes('disiapkan') || rawStatus.includes('proses')) {
+            normStatus = 'Sedang Disiapkan';
+          } else if (rawStatus.includes('siap')) {
+            normStatus = 'Siap Diambil';
+          } else if (rawStatus.includes('selesai')) {
+            normStatus = 'Selesai';
+          }
+
+          const namaSiswaAsli =
+            attr.customer_name ||
+            attr.nama_siswa ||
+            attr.namaSiswa ||
+            userAttr.username ||
+            userAttr.nama ||
+            'Pelanggan';
+
+          const totalHargaAsli = Number(attr.total_price || attr.totalPrice || attr.total) || 0;
+
+          return {
+            id: attr.order_id || attr.orderId || `#SC-${item.id}`,
+            strapiId: item.id,
+            namaSiswa: namaSiswaAsli,
+            waktu: waktuFormatted,
+            status: normStatus,
+            totalPrice: totalHargaAsli,
+          };
+        });
+
+        setAllOrders(formattedOrders);
+      } else {
+        throw new Error('Gagal Strapi');
+      }
+    } catch (err) {
+      const localData = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
+      const fallback: Pesanan[] = localData.map((data: any, idx: number) => {
+        const itemData = data.data || data;
+        const timeFormatted = itemData.createdAt
+          ? new Date(itemData.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }).replace('.', ':')
+          : '09:30';
+
+        return {
+          id: itemData.orderId || itemData.order_id || `#SC-${idx + 1}`,
+          strapiId: itemData.id || idx + 1,
+          namaSiswa: itemData.namaSiswa || itemData.customer_name || itemData.username || 'Pelanggan',
+          waktu: timeFormatted,
+          status: (itemData.status as StatusPesanan) || 'Menunggu Konfirmasi',
+          totalPrice: Number(itemData.totalPrice || itemData.total_price || itemData.total) || 0,
+        };
+      }).reverse();
+
+      setAllOrders(fallback);
+    } finally {
+      if (!isBackgroundFetch) setLoading(false);
+    }
+  };
 
   useEffect(() => {
     const today = new Date();
-    const formattedDate = today.toLocaleDateString('id-ID', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-    });
-    setCurrentDate(formattedDate);
+    setCurrentDate(
+      today.toLocaleDateString('id-ID', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      })
+    );
+
+    fetchOrdersFromStrapi();
+    const interval = setInterval(() => fetchOrdersFromStrapi(true), 4000);
+    return () => clearInterval(interval);
   }, []);
 
-  // 2. MASTER DATA: Semua Daftar Pesanan (Misal ada 32 data pesanan)
-  const [allOrders, setAllOrders] = useState<Pesanan[]>([
-    { id: '#SC09062026-001', namaSiswa: 'Siswa A', waktu: '09:30', status: 'Siap Diambil' },
-    { id: '#SC09062026-002', namaSiswa: 'Siswa B', waktu: '09:25', status: 'Sedang Disiapkan' },
-    { id: '#SC09062026-003', namaSiswa: 'Siswa C', waktu: '09:20', status: 'Menunggu Konfirmasi' },
-    { id: '#SC09062026-004', namaSiswa: 'Siswa D', waktu: '09:40', status: 'Siap Diambil' },
-    { id: '#SC09062026-005', namaSiswa: 'Siswa E', waktu: '09:15', status: 'Sedang Disiapkan' },
-    { id: '#SC09062026-006', namaSiswa: 'Siswa F', waktu: '09:10', status: 'Menunggu Konfirmasi' },
-    { id: '#SC09062026-007', namaSiswa: 'Siswa G', waktu: '09:05', status: 'Siap Diambil' },
-    { id: '#SC09062026-008', namaSiswa: 'Siswa H', waktu: '09:00', status: 'Sedang Disiapkan' },
-    // Kamu bisa panggil API database kamu di sini nantinya
-  ]);
-
-  // 3. KALKULASI RINGKASAN KOTAK: Dihitung dari SELURUH data (allOrders)
   const totalPesanan = allOrders.length;
   const totalMenunggu = allOrders.filter((p) => p.status === 'Menunggu Konfirmasi').length;
   const totalDisiapkan = allOrders.filter((p) => p.status === 'Sedang Disiapkan').length;
   const totalSiap = allOrders.filter((p) => p.status === 'Siap Diambil').length;
 
-  // 4. TABEL HANYA MENAMPILKAN 4 PESANAN TERBARU
-  const recentOrders = allOrders.slice(0, 4);
+  const recentOrders = allOrders.slice(0, 5);
 
-  // 5. Fungsi untuk Mengubah Status Pesanan saat Button Di-klik
-  const handleNextStatus = (id: string) => {
-    setAllOrders((prevOrders) =>
-      prevOrders.map((item) => {
-        if (item.id === id) {
-          // Kalau sudah 'Siap Diambil', berhenti di situ — tidak balik lagi ke awal
-          if (item.status === 'Siap Diambil') return item;
-
-          let nextStatus: StatusPesanan = item.status;
-          if (item.status === 'Menunggu Konfirmasi') nextStatus = 'Sedang Disiapkan';
-          else if (item.status === 'Sedang Disiapkan') nextStatus = 'Siap Diambil';
-
-          return { ...item, status: nextStatus };
-        }
-        return item;
-      })
-    );
-  };
-
-  // Helper untuk Warna Button Status
-  const getStatusStyle = (status: StatusPesanan) => {
+  const getBadgeStyle = (status: StatusPesanan) => {
     switch (status) {
       case 'Siap Diambil':
-        return 'bg-green-100 text-green-700 hover:bg-green-200';
+        return 'bg-[#E6F7ED] text-[#22AD5C] border-[#22AD5C]/30';
       case 'Sedang Disiapkan':
-        return 'bg-orange-100 text-orange-700 hover:bg-orange-200';
+        return 'bg-[#FFF4E5] text-[#E07A2F] border-[#E07A2F]/30';
       case 'Menunggu Konfirmasi':
-        return 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200';
+        return 'bg-[#FFF8EE] text-[#D97706] border-[#D97706]/30';
+      case 'Selesai':
+        return 'bg-[#E6F7ED] text-[#22AD5C] border-[#22AD5C]/30';
       default:
-        return 'bg-gray-100 text-gray-700';
+        return 'bg-gray-100 text-gray-600 border-gray-200';
     }
   };
 
   return (
-    <div className="flex min-h-screen bg-white">
-      {/* Overlay gelap saat sidebar terbuka di mobile */}
+    <div className="flex min-h-screen bg-white font-sans text-gray-900">
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/40 z-40 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 bg-black/40 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
-      {/* Sidebar Left */}
+      {/* SIDEBAR */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-100 p-6 flex flex-col gap-6 transform transition-transform duration-300 ease-in-out
-        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}
+        className={`fixed lg:static inset-y-0 left-0 z-50 w-72 bg-white border-r border-gray-200 p-6 flex flex-col justify-between transform transition-transform duration-300 ${
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        } lg:translate-x-0`}
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Image
-              src="/logo.png"
-              alt="Smart Canteen Logo"
-              width={40}
-              height={40}
-              className="rounded-full object-cover"
-            />
-            <div className="font-bold text-xl leading-tight">
-              <span className="text-orange-500">Smart </span>
-              <span className="text-gray-900">Canteen</span>
+        <div className="space-y-8">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="relative w-10 h-10 shrink-0">
+                <Image src="/logo.png" alt="Smart Canteen" fill className="object-contain" />
+              </div>
+              <h1 className="text-xl font-extrabold tracking-tight">
+                <span className="text-[#E07A2F]">Smart </span>
+                <span className="text-gray-900">Canteen</span>
+              </h1>
             </div>
-          </div>
-
-          {/* Tombol close, cuma muncul di mobile */}
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="lg:hidden text-gray-500 hover:text-gray-800"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="bg-gray-50 border border-gray-100 p-3 rounded-2xl flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center font-bold text-gray-600">
-            A
-          </div>
-          <div>
-            <h4 className="font-bold text-sm text-gray-900">Admin</h4>
-            <p className="text-xs text-gray-500">Penjual</p>
-          </div>
-        </div>
-
-        <nav className="flex flex-col gap-2">
-          <Link
-            href="/dasboard-admin"
-            onClick={() => setSidebarOpen(false)}
-            className="flex items-center gap-3 px-4 py-3 bg-orange-50 text-orange-500 rounded-full font-medium text-sm transition"
-          >
-            <LayoutDashboard className="w-5 h-5" />
-            Dashboard
-          </Link>
-
-          <Link
-            href="/daftar-pesanan"
-            onClick={() => setSidebarOpen(false)}
-            className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:bg-gray-50 rounded-full font-medium text-sm transition"
-          >
-            <ClipboardList className="w-5 h-5" />
-            Daftar Pesanan
-          </Link>
-
-          <Link
-            href="/kelola-menu"
-            onClick={() => setSidebarOpen(false)}
-            className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:bg-gray-50 rounded-full font-medium text-sm transition"
-          >
-            <Utensils className="w-5 h-5" />
-            Kelola Menu
-          </Link>
-
-          <Link
-            href="/laporan"
-            onClick={() => setSidebarOpen(false)}
-            className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:bg-gray-50 rounded-full font-medium text-sm transition"
-          >
-            <BarChart2 className="w-5 h-5" />
-            Laporan
-          </Link>
-        </nav>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 p-4 md:p-8 w-full min-w-0">
-        {/* Topbar mobile: tombol hamburger */}
-        <div className="flex items-center justify-between lg:hidden mb-4">
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="p-2 rounded-lg bg-white border border-gray-100 shadow-sm text-gray-600"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
-          <div className="font-bold text-lg">
-            <span className="text-orange-500">Smart </span>
-            <span className="text-gray-900">Canteen</span>
-          </div>
-        </div>
-
-        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-6 md:mb-8">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-1">Dashboard</h1>
-            <p className="text-gray-500 text-sm">Halo, Admin!</p>
-            <p className="text-gray-500 text-sm">Berikut ringkasan data hari ini.</p>
-          </div>
-
-          <div className="bg-gray-100 text-gray-600 px-4 py-2 rounded-full text-xs font-medium self-start">
-            {currentDate || 'Loading tanggal...'}
-          </div>
-        </div>
-
-        {/* 4 KOTAK RINGKASAN DATA — 2 kolom di HP, 4 kolom di layar lebar */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-8">
-          <div className="bg-white p-4 md:p-6 rounded-2xl border border-gray-100 shadow-sm text-center">
-            <span className="text-[10px] md:text-xs font-bold tracking-wider text-gray-400 uppercase block mb-2">
-              Total Pesanan
-            </span>
-            <span className="text-2xl md:text-4xl font-extrabold text-gray-900 block mb-1">
-              {totalPesanan}
-            </span>
-            <span className="text-xs text-gray-400">Pesanan</span>
-          </div>
-
-          <div className="bg-white p-4 md:p-6 rounded-2xl border border-gray-100 shadow-sm text-center">
-            <span className="text-[10px] md:text-xs font-bold tracking-wider text-gray-400 uppercase block mb-2">
-              Menunggu
-            </span>
-            <span className="text-2xl md:text-4xl font-extrabold text-gray-900 block mb-1">
-              {totalMenunggu}
-            </span>
-            <span className="text-xs text-gray-400">Pesanan</span>
-          </div>
-
-          <div className="bg-white p-4 md:p-6 rounded-2xl border border-gray-100 shadow-sm text-center">
-            <span className="text-[10px] md:text-xs font-bold tracking-wider text-gray-400 uppercase block mb-2">
-              Sedang Disiapkan
-            </span>
-            <span className="text-2xl md:text-4xl font-extrabold text-orange-500 block mb-1">
-              {totalDisiapkan}
-            </span>
-            <span className="text-xs text-gray-400">Pesanan</span>
-          </div>
-
-          <div className="bg-white p-4 md:p-6 rounded-2xl border border-gray-100 shadow-sm text-center">
-            <span className="text-[10px] md:text-xs font-bold tracking-wider text-gray-400 uppercase block mb-2">
-              Siap Diambil
-            </span>
-            <span className="text-2xl md:text-4xl font-extrabold text-green-500 block mb-1">
-              {totalSiap}
-            </span>
-            <span className="text-xs text-gray-400">Pesanan</span>
-          </div>
-        </div>
-
-        {/* PESANAN TERBARU SECTION */}
-        <div className="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-lg font-bold text-gray-900">Pesanan Terbaru</h2>
-
-            <button
-              onClick={() => router.push('/daftar-pesanan')}
-              className="text-orange-500 text-sm font-semibold hover:underline"
-            >
-              Lihat Semua
+            <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-gray-500">
+              <X className="w-6 h-6" />
             </button>
           </div>
 
-          {/* LIST PESANAN — stack ke bawah di HP, sejajar di layar lebar */}
-          <div className="flex flex-col gap-3">
-            {recentOrders.map((item) => (
-              <div
-                key={item.id}
-                className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0 py-3 px-4 hover:bg-gray-50/80 rounded-xl transition border-b border-gray-50 last:border-none"
-              >
-                <span className="font-bold text-sm text-gray-900 sm:w-1/4">{item.id}</span>
-                <span className="text-sm text-gray-600 sm:w-1/4">{item.namaSiswa}</span>
-                <span className="text-sm text-gray-400 sm:w-1/4">{item.waktu}</span>
-
-                <div className="sm:w-1/4 sm:text-right">
-                  <button
-                    onClick={() => handleNextStatus(item.id)}
-                    disabled={item.status === 'Siap Diambil'}
-                    title={
-                      item.status === 'Siap Diambil'
-                        ? 'Status akhir — tidak bisa diubah lagi'
-                        : 'Klik untuk mengubah status'
-                    }
-                    className={`px-4 py-1.5 rounded-full text-xs font-semibold transition ${
-                      item.status === 'Siap Diambil'
-                        ? 'cursor-default'
-                        : 'active:scale-95 cursor-pointer'
-                    } ${getStatusStyle(item.status)}`}
-                  >
-                    {item.status}
-                  </button>
-                </div>
-              </div>
-            ))}
+          <div className="bg-white border border-gray-200 rounded-3xl p-4 flex items-center gap-3 shadow-xs">
+            <div className="w-12 h-12 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center font-bold text-gray-800 text-lg shrink-0">
+              {inisialPenjual}
+            </div>
+            <div className="overflow-hidden">
+              <h4 className="font-extrabold text-lg text-gray-900 truncate" title={namaPenjual}>
+                {namaPenjual}
+              </h4>
+              <p className="text-sm font-semibold text-gray-500">Penjual</p>
+            </div>
           </div>
+
+          <nav className="space-y-3">
+            <Link
+              href="/dasboard-admin"
+              className="flex items-center px-6 py-4 bg-[#FFF8EE] text-[#E07A2F] border border-orange-200/80 rounded-full font-bold text-base"
+            >
+              Dashboard
+            </Link>
+            <Link
+              href="/daftar-pesanan"
+              className="flex items-center px-6 py-4 text-gray-700 hover:bg-gray-50 border border-orange-200/80 rounded-full font-bold text-base"
+            >
+              <span className="text-[#E07A2F]">Daftar Pesanan</span>
+            </Link>
+            <Link
+              href="/kelola-menu"
+              className="flex items-center px-6 py-4 text-gray-700 hover:bg-gray-50 border border-orange-200/80 rounded-full font-bold text-base"
+            >
+              <span className="text-[#E07A2F]">Kelola Menu</span>
+            </Link>
+            <Link
+              href="/laporan"
+              className="flex items-center px-6 py-4 text-gray-700 hover:bg-gray-50 border border-orange-200/80 rounded-full font-bold text-base"
+            >
+              <span className="text-[#E07A2F]">Laporan</span>
+            </Link>
+          </nav>
+        </div>
+
+        <button className="flex items-center gap-3 font-bold text-gray-800 hover:text-red-500 px-2 py-3 mt-6">
+          <LogOut className="w-6 h-6" />
+          <span className="text-lg">Keluar</span>
+        </button>
+      </aside>
+
+      {/* KONTEN UTAMA */}
+      <main className="flex-1 p-6 md:p-10 w-full min-w-0">
+        <div className="flex items-center justify-between lg:hidden mb-6">
+          <button onClick={() => setSidebarOpen(true)} className="p-2.5 rounded-2xl bg-white border border-gray-200">
+            <Menu className="w-6 h-6" />
+          </button>
+          <div className="font-extrabold text-xl">
+            <span className="text-[#E07A2F]">Smart </span>Canteen
+          </div>
+        </div>
+
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4 mb-8">
+          <div>
+            <h1 className="text-3xl md:text-4xl font-extrabold text-gray-900 mb-2">Dashboard</h1>
+            <p className="text-gray-900 font-extrabold text-lg">Halo, {namaPenjual}!</p>
+            <p className="text-gray-800 font-bold text-base">Berikut ringkasan data hari ini.</p>
+          </div>
+          <div className="bg-white border border-gray-300 px-5 py-2.5 rounded-full text-sm font-semibold text-gray-500 shadow-2xs self-start">
+            {currentDate}
+          </div>
+        </div>
+
+        {/* CARDS KATEGORI */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-8">
+          <div className="bg-white p-5 md:p-6 rounded-3xl border border-gray-300 shadow-2xs text-center flex flex-col justify-between h-full min-h-[180px]">
+            <span className="text-xs font-bold text-gray-900 uppercase">Total Pesanan</span>
+            <span className="text-3xl md:text-5xl font-black text-gray-900 block my-auto">
+              {loading ? '-' : totalPesanan}
+            </span>
+            <span className="text-xs font-bold text-gray-900">Pesanan</span>
+          </div>
+
+          <div className="bg-white p-5 md:p-6 rounded-3xl border border-gray-300 shadow-2xs text-center flex flex-col justify-between h-full min-h-[180px]">
+            <span className="text-xs font-bold text-gray-900 uppercase">Menunggu</span>
+            <span className="text-3xl md:text-5xl font-black text-gray-900 block my-auto">
+              {loading ? '-' : totalMenunggu}
+            </span>
+            <span className="text-xs font-bold text-gray-900">Pesanan</span>
+          </div>
+
+          <div className="bg-white p-5 md:p-6 rounded-3xl border border-gray-300 shadow-2xs text-center flex flex-col justify-between h-full min-h-[180px]">
+            <span className="text-xs font-bold text-gray-900 uppercase">Sedang Disiapkan</span>
+            <span className="text-3xl md:text-5xl font-black text-[#E07A2F] block my-auto">
+              {loading ? '-' : totalDisiapkan}
+            </span>
+            <span className="text-xs font-bold text-gray-900">Pesanan</span>
+          </div>
+
+          <div className="bg-white p-5 md:p-6 rounded-3xl border border-gray-300 shadow-2xs text-center flex flex-col justify-between h-full min-h-[180px]">
+            <span className="text-xs font-bold text-gray-900 uppercase">Siap Diambil</span>
+            <span className="text-3xl md:text-5xl font-black text-[#22AD5C] block my-auto">
+              {loading ? '-' : totalSiap}
+            </span>
+            <span className="text-xs font-bold text-gray-900">Pesanan</span>
+          </div>
+        </div>
+
+        {/* TABEL RINGKASAN PESANAN */}
+        <div className="bg-white border border-gray-300 rounded-[32px] p-6 md:p-8 shadow-xs">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-xl font-bold text-gray-900">Daftar Pesanan Terbaru</h2>
+            <Link href="/daftar-pesanan" className="text-[#E07A2F] text-lg font-bold hover:underline">
+              Lihat Semua
+            </Link>
+          </div>
+
+          {loading ? (
+            <div className="py-12 text-center text-gray-400 font-medium">Memuat data pesanan...</div>
+          ) : recentOrders.length > 0 ? (
+            <div className="border border-gray-200 rounded-3xl overflow-hidden overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[700px]">
+                <thead>
+                  <tr className="border-b border-gray-200 bg-white text-gray-900 font-bold text-sm sm:text-base">
+                    <th className="py-4 px-6">Id Pesanan</th>
+                    <th className="py-4 px-6">Pelanggan</th>
+                    <th className="py-4 px-6">Waktu</th>
+                    <th className="py-4 px-6">Total</th>
+                    <th className="py-4 px-6 text-center">Status</th>
+                    <th className="py-4 px-6 text-center">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 text-sm sm:text-base font-semibold text-gray-800">
+                  {recentOrders.map((item) => (
+                    <tr key={item.strapiId} className="hover:bg-gray-50/60 transition-colors">
+                      <td className="py-4 px-6 font-bold text-gray-900 whitespace-nowrap">{item.id}</td>
+                      <td className="py-4 px-6 text-gray-900 font-bold whitespace-nowrap">{item.namaSiswa}</td>
+                      <td className="py-4 px-6 text-gray-900 whitespace-nowrap">{item.waktu}</td>
+                      <td className="py-4 px-6 font-bold text-gray-900 whitespace-nowrap">
+                        Rp {item.totalPrice ? item.totalPrice.toLocaleString('id-ID') : '0'}
+                      </td>
+                      <td className="py-4 px-6 text-center whitespace-nowrap">
+                        <span className={`inline-block px-4 py-1.5 rounded-full text-xs font-bold border ${getBadgeStyle(item.status)}`}>
+                          {item.status}
+                        </span>
+                      </td>
+                      <td className="py-4 px-6 text-center whitespace-nowrap">
+                        {/* AKSI FIX MENGARAH KE /daftar-pesanan/${item.strapiId} */}
+                       <button
+                      onClick={() => router.push(`/daftar-pesanan/${item.strapiId}`)}
+                      className="p-1.5 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-100 transition-all cursor-pointer inline-flex items-center justify-center"
+                      >
+                        <ChevronRight size={18} className="stroke-[2.5]" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="py-12 text-center text-gray-400 text-sm">Belum ada pesanan terbaru.</div>
+          )}
         </div>
       </main>
     </div>
