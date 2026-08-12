@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 
 const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
+const CLEAN_STRAPI_URL = STRAPI_URL.replace(/\/$/, '');
 
 type StatusType = 'Menunggu Konfirmasi' | 'Sedang Disiapkan' | 'Siap Diambil' | 'Selesai';
 
@@ -52,6 +53,129 @@ interface OrderDetail {
   };
 }
 
+const getImageUrl = (imageAttr: any): string | null => {
+  if (!imageAttr) return null;
+
+  if (typeof imageAttr === 'string') {
+    if (imageAttr.startsWith('http://') || imageAttr.startsWith('https://')) return imageAttr;
+    return `${CLEAN_STRAPI_URL}/${imageAttr.replace(/^\//, '')}`;
+  }
+
+  if (Array.isArray(imageAttr) && imageAttr.length > 0) {
+    return getImageUrl(imageAttr[0]);
+  }
+
+  const imgObj = imageAttr.data?.attributes || imageAttr.data || imageAttr.attributes || imageAttr;
+  const url = 
+    imgObj?.formats?.medium?.url || 
+    imgObj?.formats?.small?.url || 
+    imgObj?.formats?.thumbnail?.url || 
+    imgObj?.url;
+
+  if (url) {
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    return `${CLEAN_STRAPI_URL}/${url.replace(/^\//, '')}`;
+  }
+
+  return null;
+};
+
+const parseItems = (attrData: any, allStrapiMenus: any[] = [], localItemsBackup: any[] = []): OrderItem[] => {
+  let rawItems = attrData?.items || attrData?.order_items || attrData?.menu_items || attrData?.details || [];
+
+  if (typeof rawItems === 'string') {
+    try { rawItems = JSON.parse(rawItems); } catch (e) { rawItems = []; }
+  }
+
+  if (rawItems && !Array.isArray(rawItems) && Array.isArray(rawItems.data)) {
+    rawItems = rawItems.data;
+  }
+
+  if (!Array.isArray(rawItems) || rawItems.length === 0) {
+    if (Array.isArray(localItemsBackup) && localItemsBackup.length > 0) {
+      rawItems = localItemsBackup;
+    } else {
+      return [];
+    }
+  }
+
+  return rawItems.map((it: any, idx: number) => {
+    const itemAttr = it.attributes || it;
+    const menuRel = itemAttr.menu?.data?.attributes || 
+                    itemAttr.menu?.data || 
+                    itemAttr.menu?.attributes || 
+                    itemAttr.menu || 
+                    {};
+
+    let name = itemAttr.name || 
+               itemAttr.nama || 
+               itemAttr.nama_makanan || 
+               itemAttr.nama_menu || 
+               itemAttr.title ||
+               menuRel.name || 
+               menuRel.nama;
+
+    let price = Number(
+      itemAttr.price || 
+      itemAttr.harga || 
+      menuRel.price || 
+      menuRel.harga || 
+      0
+    );
+
+    const quantity = Number(
+      itemAttr.quantity || 
+      itemAttr.qty || 
+      itemAttr.jumlah || 
+      1
+    );
+
+    let rawImg = menuRel.image || menuRel.gambar || menuRel.foto || itemAttr.image || itemAttr.gambar || itemAttr.foto;
+
+    const targetMenuId = menuRel.id || 
+                         itemAttr.menu_id || 
+                         itemAttr.menuId || 
+                         (typeof itemAttr.menu === 'object' ? itemAttr.menu?.id : (typeof itemAttr.menu === 'number' || typeof itemAttr.menu === 'string' ? itemAttr.menu : null)) ||
+                         itemAttr.id ||
+                         menuRel.documentId;
+
+    if ((!name || price === 0) && Array.isArray(localItemsBackup) && localItemsBackup[idx]) {
+      const b = localItemsBackup[idx];
+      if (!name) name = b.name || b.nama || b.nama_makanan;
+      if (price === 0) price = Number(b.price || b.harga || 0);
+      if (!rawImg) rawImg = b.image || b.gambar || b.foto;
+    }
+    
+    if (allStrapiMenus.length > 0) {
+      const matchedMenu = allStrapiMenus.find((m: any) => {
+        const mAttr = m.attributes || m;
+        const mName = mAttr.name || mAttr.nama || '';
+        return (
+          (targetMenuId && String(m.id) === String(targetMenuId)) ||
+          (targetMenuId && String(m.documentId) === String(targetMenuId)) ||
+          (name && mName.toLowerCase().trim() === String(name).toLowerCase().trim())
+        );
+      });
+
+      if (matchedMenu) {
+        const mAttr = matchedMenu.attributes || matchedMenu;
+        if (!name) name = mAttr.name || mAttr.nama;
+        if (price === 0) price = Number(mAttr.price || mAttr.harga || 0);
+        if (!rawImg) rawImg = mAttr.image || mAttr.gambar || mAttr.foto;
+      }
+    }
+
+    return {
+      id: targetMenuId || itemAttr.id || Math.random(),
+      name: name || 'Menu Makanan',
+      price: price || 0,
+      quantity: quantity,
+      image: getImageUrl(rawImg),
+      notes: itemAttr.notes || itemAttr.catatan || itemAttr.note || '',
+    };
+  });
+};
+
 export default function DetailPesananPage() {
   const router = useRouter();
   const params = useParams();
@@ -63,139 +187,7 @@ export default function DetailPesananPage() {
   const [showErrorModal, setShowErrorModal] = useState<boolean>(false);
   const [showSuccessModal, setShowSuccessModal] = useState<boolean>(false);
 
-  // Helper Ambil URL Gambar Lengkap dari Strapi
-  const getImageUrl = (imageAttr: any): string | null => {
-    if (!imageAttr) return null;
-
-    if (typeof imageAttr === 'string') {
-      if (imageAttr.startsWith('http://') || imageAttr.startsWith('https://')) return imageAttr;
-      return `${STRAPI_URL}${imageAttr.startsWith('/') ? '' : '/'}${imageAttr}`;
-    }
-
-    if (Array.isArray(imageAttr) && imageAttr.length > 0) {
-      return getImageUrl(imageAttr[0]);
-    }
-
-    const imgObj = imageAttr.data?.attributes || imageAttr.data || imageAttr.attributes || imageAttr;
-    const url = 
-      imgObj?.formats?.medium?.url || 
-      imgObj?.formats?.small?.url || 
-      imgObj?.formats?.thumbnail?.url || 
-      imgObj?.url;
-
-    if (url) {
-      if (url.startsWith('http://') || url.startsWith('https://')) return url;
-      return `${STRAPI_URL}${url.startsWith('/') ? '' : '/'}${url}`;
-    }
-
-    return null;
-  };
-
-  // Parsing Items & Pencocokan Otomatis dengan Master Menu Strapi
-  // Parsing Items & Pencocokan Otomatis dengan Master Menu Strapi + LocalStorage Fallback
-  // 1. Parsing Items yang Diperbaiki (Menghapus matching harga agresif agar menu tidak tertukar)
-  const parseItems = (attrData: any, allStrapiMenus: any[] = [], localItemsBackup: any[] = []): OrderItem[] => {
-    let rawItems = attrData?.items || attrData?.order_items || attrData?.menu_items || attrData?.details || [];
-
-    if (typeof rawItems === 'string') {
-      try { rawItems = JSON.parse(rawItems); } catch (e) { rawItems = []; }
-    }
-
-    if (rawItems && !Array.isArray(rawItems) && Array.isArray(rawItems.data)) {
-      rawItems = rawItems.data;
-    }
-
-    if (!Array.isArray(rawItems) || rawItems.length === 0) {
-      if (Array.isArray(localItemsBackup) && localItemsBackup.length > 0) {
-        rawItems = localItemsBackup;
-      } else {
-        return [];
-      }
-    }
-
-    return rawItems.map((it: any, idx: number) => {
-      const itemAttr = it.attributes || it;
-      const menuRel = itemAttr.menu?.data?.attributes || 
-                      itemAttr.menu?.data || 
-                      itemAttr.menu?.attributes || 
-                      itemAttr.menu || 
-                      {};
-
-      // Ambil nama
-      let name = itemAttr.name || 
-                 itemAttr.nama || 
-                 itemAttr.nama_makanan || 
-                 itemAttr.nama_menu || 
-                 itemAttr.title ||
-                 menuRel.name || 
-                 menuRel.nama;
-
-      // Ambil harga
-      let price = Number(
-        itemAttr.price || 
-        itemAttr.harga || 
-        menuRel.price || 
-        menuRel.harga || 
-        0
-      );
-
-      const quantity = Number(
-        itemAttr.quantity || 
-        itemAttr.qty || 
-        itemAttr.jumlah || 
-        1
-      );
-
-      let rawImg = menuRel.image || menuRel.gambar || menuRel.foto || itemAttr.image || itemAttr.gambar || itemAttr.foto;
-
-      // Ekstrak ID menu
-      const targetMenuId = menuRel.id || 
-                           itemAttr.menu_id || 
-                           itemAttr.menuId || 
-                           (typeof itemAttr.menu === 'object' ? itemAttr.menu?.id : (typeof itemAttr.menu === 'number' || typeof itemAttr.menu === 'string' ? itemAttr.menu : null)) ||
-                           itemAttr.id ||
-                           menuRel.documentId;
-
-      // Fallback 1: Ambil dari backup lokal berdasarkan INDEX (bukan pencocokan harga)
-      if ((!name || price === 0) && Array.isArray(localItemsBackup) && localItemsBackup[idx]) {
-        const b = localItemsBackup[idx];
-        if (!name) name = b.name || b.nama || b.nama_makanan;
-        if (price === 0) price = Number(b.price || b.harga || 0);
-        if (!rawImg) rawImg = b.image || b.gambar || b.foto;
-      }
-      
-      // Fallback 2: Pencocokan ke Master Menu Strapi BERDASARKAN ID ATAU NAMA
-      if (allStrapiMenus.length > 0) {
-        const matchedMenu = allStrapiMenus.find((m: any) => {
-          const mAttr = m.attributes || m;
-          const mName = mAttr.name || mAttr.nama || '';
-          return (
-            (targetMenuId && String(m.id) === String(targetMenuId)) ||
-            (targetMenuId && String(m.documentId) === String(targetMenuId)) ||
-            (name && mName.toLowerCase().trim() === String(name).toLowerCase().trim())
-          );
-        });
-
-        if (matchedMenu) {
-          const mAttr = matchedMenu.attributes || matchedMenu;
-          if (!name) name = mAttr.name || mAttr.nama;
-          if (price === 0) price = Number(mAttr.price || mAttr.harga || 0);
-          if (!rawImg) rawImg = mAttr.image || mAttr.gambar || mAttr.foto;
-        }
-      }
-
-      return {
-        id: targetMenuId || itemAttr.id || Math.random(),
-        name: name || 'Menu Makanan',
-        price: price || 0,
-        quantity: quantity,
-        image: getImageUrl(rawImg),
-        notes: itemAttr.notes || itemAttr.catatan || itemAttr.note || '',
-      };
-    });
-  };
-
-  // 2. FetchOrderDetail yang Diperbaiki (Total Bayar dihitung murni dari penjumlahan item)
+  // FetchOrderDetail yang Diperbaiki (Total Bayar dihitung murni dari penjumlahan item)
   const fetchOrderDetail = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoading(true);
     let foundOrder: OrderDetail | null = null;
