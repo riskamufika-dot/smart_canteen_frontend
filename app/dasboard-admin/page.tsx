@@ -8,6 +8,9 @@ import { Menu, X, ChevronRight, LogOut } from 'lucide-react';
 
 const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
 
+// Daftar email khusus Admin / Penjual
+const ADMIN_EMAILS = ['adminkantin@gmail.com'];
+
 type StatusPesanan = 'Menunggu Konfirmasi' | 'Sedang Disiapkan' | 'Siap Diambil' | 'Selesai';
 
 interface Pesanan {
@@ -26,51 +29,59 @@ export default function DashboardAdmin() {
   const [currentDate, setCurrentDate] = useState<string>('');
   const [allOrders, setAllOrders] = useState<Pesanan[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [authorized, setAuthorized] = useState<boolean>(false);
 
   // State Profil Penjual
-  const [userData, setUserData] = useState<{ username: string; nama?: string } | null>(null);
+  const [userData, setUserData] = useState<{ username: string; nama?: string; email?: string } | null>(null);
 
-  // FETCH DATA PROFIL PENJUAL DARI LOCALSTORAGE / STRAPI
+  // 1. PROTEKSI HALAMAN & FETCH PROFIL PENJUAL
   useEffect(() => {
-    const fetchUserProfile = async () => {
+    const checkAuthAndFetchProfile = () => {
       const savedUser = localStorage.getItem('user');
-      const jwt = localStorage.getItem('jwt');
+      const token = localStorage.getItem('token');
 
-      if (savedUser) {
-        try {
-          setUserData(JSON.parse(savedUser));
-        } catch (e) {
-          console.error('Error parse user storage:', e);
-        }
+      if (!savedUser || !token) {
+        router.push('/');
+        return;
       }
 
-      if (jwt) {
-        try {
-          const res = await fetch(`${STRAPI_URL}/api/users/me`, {
-            headers: { Authorization: `Bearer ${jwt}` },
-          });
-          if (res.ok) {
-            const userJson = await res.json();
-            setUserData(userJson);
-            localStorage.setItem('user', JSON.stringify(userJson));
-          }
-        } catch (err) {
-          console.error('Gagal fetch profil user:', err);
+      try {
+        const parsedUser = JSON.parse(savedUser);
+        const userEmail = (parsedUser.email || '').toLowerCase();
+
+        if (!ADMIN_EMAILS.includes(userEmail)) {
+          alert('Akses ditolak! Halaman ini hanya untuk Admin Penjual.');
+          router.push('/home');
+          return;
         }
+
+        setUserData(parsedUser);
+        setAuthorized(true);
+      } catch (e) {
+        console.error('Error parsing user storage:', e);
+        router.push('/');
       }
     };
 
-    fetchUserProfile();
-  }, []);
+    checkAuthAndFetchProfile();
+  }, [router]);
 
-  const namaPenjual = userData?.nama || userData?.username || 'Admin';
+  // FUNGSI LOGOUT
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('jwt');
+    localStorage.removeItem('user');
+    router.push('/');
+  };
+
+  const namaPenjual = userData?.nama || userData?.username || 'Admin Kantin';
   const inisialPenjual = namaPenjual.charAt(0).toUpperCase();
 
-  // FETCH DATA PESANAN DARI STRAPI & LOCALSTORAGE WITH DEEP POPULATE
+  // 2. FETCH DATA PESANAN UTAMA DARI STRAPI
   const fetchOrdersFromStrapi = async (isBackgroundFetch = false) => {
     if (!isBackgroundFetch) setLoading(true);
     try {
-      const res = await fetch(`${STRAPI_URL}/api/orders?sort[0]=createdAt:desc&populate[items][populate][menu]=*`);
+      const res = await fetch(`${STRAPI_URL}/api/orders?sort[0]=createdAt:desc&populate=*`);
 
       if (res.ok) {
         const result = await res.json();
@@ -85,15 +96,36 @@ export default function DashboardAdmin() {
             .toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
             .replace('.', ':');
 
+          // FIX LOGIKA STATUS PESANAN (Mencakup variasi format Strapi)
           let normStatus: StatusPesanan = 'Menunggu Konfirmasi';
-          const rawStatus = (attr.menu_status || attr.status || attr.order_status || '').toLowerCase();
+          const rawStatus = (
+            attr.menu_status || 
+            attr.status || 
+            attr.order_status || 
+            ''
+          ).toString().toLowerCase().trim();
 
-          if (rawStatus.includes('disiapkan') || rawStatus.includes('proses')) {
+          if (
+            rawStatus.includes('disiapkan') || 
+            rawStatus.includes('proses') || 
+            rawStatus.includes('processing') || 
+            rawStatus.includes('preparing')
+          ) {
             normStatus = 'Sedang Disiapkan';
-          } else if (rawStatus.includes('siap')) {
+          } else if (
+            rawStatus.includes('siap') || 
+            rawStatus.includes('ready') || 
+            rawStatus.includes('diambil')
+          ) {
             normStatus = 'Siap Diambil';
-          } else if (rawStatus.includes('selesai')) {
+          } else if (
+            rawStatus.includes('selesai') || 
+            rawStatus.includes('completed') || 
+            rawStatus.includes('done')
+          ) {
             normStatus = 'Selesai';
+          } else {
+            normStatus = 'Menunggu Konfirmasi';
           }
 
           const namaSiswaAsli =
@@ -102,7 +134,7 @@ export default function DashboardAdmin() {
             attr.namaSiswa ||
             userAttr.username ||
             userAttr.nama ||
-            'Pelanggan';
+            'Siswa Pelanggan';
 
           const totalHargaAsli = Number(attr.total_price || attr.totalPrice || attr.total) || 0;
 
@@ -118,27 +150,12 @@ export default function DashboardAdmin() {
 
         setAllOrders(formattedOrders);
       } else {
-        throw new Error('Gagal Strapi');
+        throw new Error('Gagal mengambil data dari Strapi');
       }
     } catch (err) {
-      const localData = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
-      const fallback: Pesanan[] = localData.map((data: any, idx: number) => {
-        const itemData = data.data || data;
-        const timeFormatted = itemData.createdAt
-          ? new Date(itemData.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }).replace('.', ':')
-          : '09:30';
-
-        return {
-          id: itemData.orderId || itemData.order_id || `#SC-${idx + 1}`,
-          strapiId: itemData.id || idx + 1,
-          namaSiswa: itemData.namaSiswa || itemData.customer_name || itemData.username || 'Pelanggan',
-          waktu: timeFormatted,
-          status: (itemData.status as StatusPesanan) || 'Menunggu Konfirmasi',
-          totalPrice: Number(itemData.totalPrice || itemData.total_price || itemData.total) || 0,
-        };
-      }).reverse();
-
-      setAllOrders(fallback);
+      console.error('Fetch orders error:', err);
+      // Jika fetch ke backend gagal total, baru gunakan fallback tanpa menduplikasi data
+      setAllOrders([]);
     } finally {
       if (!isBackgroundFetch) setLoading(false);
     }
@@ -181,6 +198,14 @@ export default function DashboardAdmin() {
         return 'bg-gray-100 text-gray-600 border-gray-200';
     }
   };
+
+  if (!authorized) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-white text-gray-600 font-bold">
+        Memeriksa hak akses admin...
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-white font-sans text-gray-900">
@@ -241,16 +266,13 @@ export default function DashboardAdmin() {
             >
               <span className="text-[#E07A2F]">Kelola Menu</span>
             </Link>
-            <Link
-              href="/laporan"
-              className="flex items-center px-6 py-4 text-gray-700 hover:bg-gray-50 border border-orange-200/80 rounded-full font-bold text-base"
-            >
-              <span className="text-[#E07A2F]">Laporan</span>
-            </Link>
           </nav>
         </div>
 
-        <button className="flex items-center gap-3 font-bold text-gray-800 hover:text-red-500 px-2 py-3 mt-6">
+        <button
+          onClick={handleLogout}
+          className="flex items-center gap-3 font-bold text-gray-800 hover:text-red-500 px-2 py-3 mt-6 transition-colors"
+        >
           <LogOut className="w-6 h-6" />
           <span className="text-lg">Keluar</span>
         </button>
@@ -352,12 +374,11 @@ export default function DashboardAdmin() {
                         </span>
                       </td>
                       <td className="py-4 px-6 text-center whitespace-nowrap">
-                        {/* AKSI FIX MENGARAH KE /daftar-pesanan/${item.strapiId} */}
-                       <button
-                      onClick={() => router.push(`/daftar-pesanan/${item.strapiId}`)}
-                      className="p-1.5 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-100 transition-all cursor-pointer inline-flex items-center justify-center"
-                      >
-                        <ChevronRight size={18} className="stroke-[2.5]" />
+                        <button
+                          onClick={() => router.push(`/daftar-pesanan/${item.strapiId}`)}
+                          className="p-1.5 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-100 transition-all cursor-pointer inline-flex items-center justify-center"
+                        >
+                          <ChevronRight size={18} className="stroke-[2.5]" />
                         </button>
                       </td>
                     </tr>

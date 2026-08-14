@@ -36,7 +36,7 @@ export default function StatusPesananPage() {
   const [order, setOrder] = useState<OrderData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // PARSER PRESISI & BEBAS GARIS MERAH TYPESCRIPT
+  // PARSER ITEM PESANAN FIX (TIDAK MENIMPA DENGAN ID SEBLAK)
   const parseItems = (rawItemsInput: any, masterMenus: any[] = []): OrderItem[] => {
     let parsed: any[] = [];
     if (!rawItemsInput) return [];
@@ -53,19 +53,17 @@ export default function StatusPesananPage() {
       const attr = it.attributes || it;
       const menuObj = attr.menu?.data?.attributes || attr.menu?.data || attr.menu || {};
 
-      let name = menuObj.name || menuObj.nama || attr.name || attr.nama;
-      let price = Number(menuObj.price || menuObj.harga || attr.price || attr.harga || 0);
+      // Prioritaskan nama & harga yang tersimpan di item pesanan itu sendiri
+      let name = attr.name || attr.nama || attr.title || menuObj.name || menuObj.nama;
+      let price = Number(attr.price || attr.harga || menuObj.price || menuObj.harga || 0);
       const quantity = Number(attr.quantity || attr.qty || attr.jumlah || 1);
       const notes = attr.notes || attr.note || attr.catatan || '';
 
-      const itemId = attr.id || menuObj.id || attr.menu_id;
+      const itemId = attr.menu_id || attr.id || menuObj.id;
 
-      // Pencocokan Cadangan ke Master Menu jika relasi dari Strapi kosong
-      if (masterMenus.length > 0 && (!name || price === 0)) {
-        const matched = masterMenus.find((m: any) => {
-          const mAttr = m.attributes || m;
-          return String(m.id) === String(itemId) || String(mAttr.name || mAttr.nama || '').toLowerCase() === String(name || '').toLowerCase();
-        });
+      // Pencocokan ke Master Menu hanya jika ID-nya jelas dan nama/harga belum ada
+      if (masterMenus.length > 0 && itemId && (!name || price === 0)) {
+        const matched = masterMenus.find((m: any) => String(m.id) === String(itemId));
 
         if (matched) {
           const mAttr = matched.attributes || matched;
@@ -84,61 +82,71 @@ export default function StatusPesananPage() {
     });
   };
 
+  // NORMALISASI STATUS PESANAN AGAR KONSISTEN
+  const normalizeStatus = (rawStatus: any): 'menunggu' | 'proses' | 'siap' | 'selesai' => {
+    if (!rawStatus) return 'menunggu';
+
+    const s = String(rawStatus).toLowerCase().trim().replace(/_/g, ' ');
+
+    if (s.includes('selesai') || s.includes('complete') || s.includes('done') || s.includes('finish')) {
+      return 'selesai';
+    }
+
+    if (
+      s.includes('disiapkan') || 
+      s.includes('proses') || 
+      s.includes('prepare') || 
+      s.includes('progres') ||
+      s.includes('masak') ||
+      s.includes('buat')
+    ) {
+      return 'proses';
+    }
+
+    if (s.includes('siap') || s.includes('ready') || s.includes('dijemput') || s.includes('takeaway')) {
+      return 'siap';
+    }
+
+    return 'menunggu';
+  };
+
   const fetchLatestOrder = useCallback(async () => {
     let latestData: OrderData | null = null;
 
-    // 1. Ambil ID Pesanan spesifik milik user yang sedang aktif
     const activeOrderId = typeof window !== 'undefined' ? (localStorage.getItem('active_order_id') || '') : '';
+    const cleanOrderId = activeOrderId.replace('#', '').trim();
+    const searchId = cleanOrderId.includes('-') ? cleanOrderId.split('-').pop() : cleanOrderId;
 
-    let latestLocal: any = null;
-    try {
-      const savedOrders = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
-      if (savedOrders.length > 0) {
-        latestLocal = savedOrders.find((o: any) => o.orderId === activeOrderId || o.order_id === activeOrderId) || savedOrders[0];
-      }
-    } catch (e) {}
-
-    // 2. Fetch Master Menu Strapi
     let masterMenus: any[] = [];
     try {
-      const resMenus = await fetch(`${STRAPI_URL}/api/menus?populate=*&pagination[pageSize]=1000`);
+      const resMenus = await fetch(`${STRAPI_URL}/api/menus?pagination[pageSize]=1000`, { cache: 'no-store' });
       if (resMenus.ok) {
         const jsonMenus = await resMenus.json();
         masterMenus = jsonMenus.data || [];
       }
     } catch (e) {}
 
-    // 3. Fetch Data Pesanan Spesifik dari Strapi v5 (DEEP POPULATE RELASI MENU)
     try {
-      const fetchUrl = activeOrderId
-        ? `${STRAPI_URL}/api/orders?filters[order_id][$eq]=${encodeURIComponent(activeOrderId)}&populate[items][populate][menu][populate]=*&populate[items][populate]=*&populate=*&status=draft`
-        : `${STRAPI_URL}/api/orders?populate[items][populate][menu][populate]=*&populate[items][populate]=*&populate=*&status=draft&sort[0]=createdAt:desc&pagination[limit]=1`;
-
+      const fetchUrl = `${STRAPI_URL}/api/orders?filters[order_id][$contains]=${searchId}&populate=*`;
       const res = await fetch(fetchUrl, { cache: 'no-store' });
 
       if (res.ok) {
         const json = await res.json();
-        if (json.data && json.data.length > 0) {
-          const raw = json.data[0];
+        const ordersList = json.data || [];
+
+        if (ordersList.length > 0) {
+          const raw = ordersList[0];
           const attr = raw.attributes ? { ...raw.attributes, id: raw.id } : raw;
 
           const parsedItems = parseItems(attr.items || attr.order_items || attr.details, masterMenus);
-          
-          // FIX TYPESCRIPT GARIS MERAH: Pengamanan Number() pada perkalian
+
           const calculatedTotal = parsedItems.reduce(
             (sum: number, it: OrderItem) => sum + (Number(it.price || 0) * Number(it.quantity || 1)),
             0
           );
 
-          const rawStatus = String(attr.menu_status || attr.status_pesanan || attr.status || '').toLowerCase();
-          let normStatus = 'Menunggu Konfirmasi';
-          if (rawStatus.includes('disiapkan') || rawStatus === 'sedang_disiapkan') {
-            normStatus = 'Sedang Disiapkan';
-          } else if (rawStatus.includes('siap') || rawStatus === 'siap_diambil') {
-            normStatus = 'Siap Diambil';
-          } else if (rawStatus.includes('selesai')) {
-            normStatus = 'Selesai';
-          }
+          const rawStatus = attr.status || attr.status_pesanan || attr.menu_status || '';
+          const normStatus = normalizeStatus(rawStatus);
 
           latestData = {
             id: raw.id,
@@ -147,53 +155,20 @@ export default function StatusPesananPage() {
             updatedAt: attr.updatedAt || new Date().toISOString(),
             status: normStatus,
             totalPrice: Number(attr.total_price || attr.totalPrice) || calculatedTotal,
-            items: parsedItems.length > 0 ? parsedItems : (latestLocal ? parseItems(latestLocal.items, masterMenus) : []),
-            pickupDate: attr.pickup_date || attr.pickupDate || latestLocal?.pickupDate || '-',
-            pickupTime: attr.pickup_time || attr.pickupTime || latestLocal?.pickupTime || '06.15 WIB',
-            paymentMethod: String(attr.payment_method || attr.paymentMethod || latestLocal?.paymentMethod || 'CASH').toUpperCase(),
+            items: parsedItems,
+            pickupDate: attr.pickup_date || attr.pickupDate || '-',
+            pickupTime: attr.pickup_time || attr.pickupTime || '06.15 WIB',
+            paymentMethod: String(attr.payment_method || attr.paymentMethod || 'CASH').toUpperCase(),
           };
         }
       }
     } catch (e) {
-      console.warn('Strapi offline, beralih ke lokal:', e);
+      console.warn('Gagal fetch dari Strapi:', e);
     }
 
-    // 4. Fallback LocalStorage jika backend Strapi offline
-    if (!latestData && latestLocal) {
-      const raw = latestLocal.data || latestLocal;
-      const parsedItems = parseItems(raw.items, masterMenus);
-
-      const rawStatus = String(raw.status || raw.menu_status || '').toLowerCase();
-      let normStatus = 'Menunggu Konfirmasi';
-      if (rawStatus.includes('disiapkan') || rawStatus === 'sedang_disiapkan') {
-        normStatus = 'Sedang Disiapkan';
-      } else if (rawStatus.includes('siap') || rawStatus === 'siap_diambil') {
-        normStatus = 'Siap Diambil';
-      } else if (rawStatus.includes('selesai')) {
-        normStatus = 'Selesai';
-      }
-
-      // FIX TYPESCRIPT GARIS MERAH
-      const calculatedTotal = parsedItems.reduce(
-        (sum: number, it: OrderItem) => sum + (Number(it.price || 0) * Number(it.quantity || 1)),
-        0
-      );
-
-      latestData = {
-        id: raw.id || 1,
-        orderId: raw.orderId || raw.order_id || `#SC001`,
-        createdAt: raw.createdAt || new Date().toISOString(),
-        updatedAt: raw.updatedAt || new Date().toISOString(),
-        status: normStatus,
-        totalPrice: Number(raw.totalPrice || raw.total_price) || calculatedTotal,
-        items: parsedItems,
-        pickupDate: raw.pickupDate || raw.pickup_date || '-',
-        pickupTime: raw.pickupTime || raw.pickup_time || '06.15 WIB',
-        paymentMethod: String(raw.paymentMethod || raw.payment_method || 'CASH').toUpperCase(),
-      };
+    if (latestData) {
+      setOrder(latestData);
     }
-
-    setOrder(latestData);
     setLoading(false);
   }, []);
 
@@ -204,9 +179,7 @@ export default function StatusPesananPage() {
       fetchLatestOrder();
     }, 3000);
 
-    return () => {
-      clearInterval(intervalId);
-    };
+    return () => clearInterval(intervalId);
   }, [fetchLatestOrder]);
 
   const formatDate = (dateString?: string) => {
@@ -260,12 +233,12 @@ export default function StatusPesananPage() {
 
   const rawStatusText = String(order.status || '').toLowerCase();
   let currentStatusIndex = 0;
-  if (rawStatusText.includes('disiapkan') || rawStatusText.includes('proses')) {
-    currentStatusIndex = 1;
+  if (rawStatusText.includes('selesai')) {
+    currentStatusIndex = 3;
   } else if (rawStatusText.includes('siap')) {
     currentStatusIndex = 2;
-  } else if (rawStatusText.includes('selesai')) {
-    currentStatusIndex = 3;
+  } else if (rawStatusText.includes('proses')) {
+    currentStatusIndex = 1;
   }
 
   const isCompletedOrder = currentStatusIndex === 3;
@@ -279,7 +252,7 @@ export default function StatusPesananPage() {
 
   return (
     <div className="w-full min-h-screen bg-white font-sans text-gray-900 py-6 px-4 sm:px-8">
-      <main className="w-full space-y-6 max-w-4xl mx-auto">
+      <main className="w-full space-y-6 mx-auto">
 
         {/* HEADER NAVBAR */}
         <div className="flex items-center justify-between pb-4 border-b border-gray-100">
@@ -370,12 +343,6 @@ export default function StatusPesananPage() {
             <p className="text-sm text-green-800 font-bold">
               🎉 Pesanan ini telah selesai!
             </p>
-            <button
-              onClick={() => router.push('/home')}
-              className="px-6 py-2.5 bg-[#52C453] hover:bg-green-600 text-white font-bold text-sm rounded-xl transition-all cursor-pointer shadow-sm"
-            >
-              Kembali ke Beranda
-            </button>
           </div>
         )}
 

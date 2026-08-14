@@ -4,6 +4,10 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { User, Mail, Lock, BookOpen } from 'lucide-react';
 
+// DAFTAR EMAIL KHUSUS ADMIN / PENJUAL
+// Pastikan huruf kecil semua dan sama persis dengan email yang dibuat di Strapi
+const ADMIN_EMAILS = ['adminkantin@gmail.com'];
+
 export default function AuthPage() {
   const router = useRouter();
   const [isSignUp, setIsSignUp] = useState<boolean>(true);
@@ -25,7 +29,7 @@ export default function AuthPage() {
 
     try {
       if (isSignUp) {
-        // --- PROSES SIGN UP ---
+        // --- PROSES SIGN UP (Siswa/User Biasa) ---
         const res = await fetch(`${STRAPI_URL}/api/auth/local/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -55,12 +59,23 @@ export default function AuthPage() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error?.message || 'Email atau password salah.');
 
-        // Simpan JWT token ke localStorage
+        // Simpan JWT Token dan Data User langsung dari respon login
         localStorage.setItem('token', data.jwt);
         localStorage.setItem('user', JSON.stringify(data.user));
 
         alert('Login berhasil!');
-        router.push('/home');
+
+        // --- PENGECEKAN EMAIL ADMIN (LANGSUNG DARI INPUT ATAU DATA USER) ---
+        const loggedInEmail = (data.user?.email || email).trim().toLowerCase();
+
+        // Cek apakah email yang dipakai login ada di dalam daftar ADMIN_EMAILS
+        const isAdmin = ADMIN_EMAILS.includes(loggedInEmail);
+
+        if (isAdmin) {
+          router.push('/dasboard-admin'); // Arahkan ke Dashboard Admin
+        } else {
+          router.push('/home');           // Arahkan ke Home Siswa
+        }
       }
     } catch (err: any) {
       setErrorMsg(err.message);

@@ -96,38 +96,34 @@ function MenuContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // 1. Membaca nomor page dari URL jika pengguna kembali dari halaman detail
+  // Baca nomor page dari URL saat pertama render saja
   const pageParam = searchParams?.get('page');
   const initialSection = pageParam ? Math.min(Math.max(Number(pageParam), 1), 4) : 1;
 
   const [activeSection, setActiveSection] = useState<number>(initialSection);
   const [searchTerm, setSearchTerm] = useState<string>('');
 
-  // Ambil Data dari Database Strapi
+  // Fetch data menu sekali saja — dep array kosong, tidak bergantung pada state apapun
   useEffect(() => {
-    async function getAboutData() {
+    let cancelled = false;
+    async function fetchMenus() {
       setLoading(true);
       try {
         const response = await fetch(
           `${STRAPI_URL}/api/menus?populate=*&pagination[limit]=10000`
         );
         const res: MenusRepsonse['res'] = await response.json();
-        setData(res);
+        if (!cancelled) setData(res);
       } catch (error) {
-        console.error({ error });
+        console.error(error);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
-    getAboutData();
+    fetchMenus();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Update activeSection jika query URL berubah
-  useEffect(() => {
-    if (pageParam) {
-      setActiveSection(Number(pageParam));
-    }
-  }, [pageParam]);
 
   // Helper Ambil Nama Menu Aman (Strapi v4/v5/Flat)
   const getMenuName = (menu: any) => {

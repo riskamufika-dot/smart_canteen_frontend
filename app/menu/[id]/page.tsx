@@ -76,9 +76,10 @@ export default function DetailMenuPage() {
   const [note, setNote] = useState<string>('');
 
   useEffect(() => {
+    let isMounted = true;
+
     async function getMenuDetail() {
       if (!params?.id) return;
-      setLoading(true);
 
       try {
         // Fetch dengan status=draft agar membaca data terbaru dari Strapi
@@ -88,7 +89,7 @@ export default function DetailMenuPage() {
 
         if (res.ok) {
           const result = await res.json();
-          if (result.data) {
+          if (result.data && isMounted) {
             setMenu(result.data);
             setLoading(false);
             return;
@@ -100,7 +101,7 @@ export default function DetailMenuPage() {
         );
         let filterResult = await res.json();
 
-        if (filterResult?.data && filterResult.data.length > 0) {
+        if (filterResult?.data && filterResult.data.length > 0 && isMounted) {
           setMenu(filterResult.data[0]);
           setLoading(false);
           return;
@@ -111,22 +112,34 @@ export default function DetailMenuPage() {
         );
         filterResult = await res.json();
 
-        if (filterResult?.data && filterResult.data.length > 0) {
+        if (filterResult?.data && filterResult.data.length > 0 && isMounted) {
           setMenu(filterResult.data[0]);
           setLoading(false);
           return;
         }
 
-        setMenu(null);
+        if (isMounted) setMenu(null);
       } catch (error) {
         console.error('Gagal mengambil detail menu:', error);
-        setMenu(null);
+        if (isMounted) setMenu(null);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     }
 
+    // 1. Panggil saat halaman pertama kali dibuka
     getMenuDetail();
+
+    // 2. POLLING REAL-TIME: Fetch ulang setiap 3 detik (3000 ms) agar status selalu ter-update
+    const intervalId = setInterval(() => {
+      getMenuDetail();
+    }, 3000);
+
+    // 3. Cleanup interval saat komponen di-unmount
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
   }, [params?.id]);
 
   const handleIncrease = () => setQuantity((prev) => prev + 1);
@@ -337,7 +350,7 @@ export default function DetailMenuPage() {
                     : 'bg-gray-200 text-gray-400 cursor-not-allowed border border-gray-300'
                 }`}
               >
-                <ShoppingCart size={22} className={isTersedia ? "text-white fill-white" : "text-gray-400"} />
+                <ShoppingCart size={22} className={isTersedia ? "text-white fill-[#ffffff]" : "text-gray-400"} />
                 <span className="text-lg font-bold">
                   {isTersedia ? 'Tambah Ke Keranjang' : 'Menu Sedang Habis'}
                 </span>

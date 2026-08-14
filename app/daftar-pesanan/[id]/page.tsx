@@ -28,7 +28,7 @@ interface OrderItem {
 }
 
 interface OrderDetail {
-  documentId?: number
+  documentId?: number;
   id: number | string;
   orderId: string;
   createdAt: string;
@@ -78,6 +78,7 @@ export default function DetailPesananPage() {
     return null;
   };
 
+  // PARSER ITEM FIX (MEMANTAPKAN UTAMANYA NAMA & HARGA ASLI ITEM)
   const parseItems = (attrData: any, allStrapiMenus: any[] = []): OrderItem[] => {
     let rawItems = attrData?.items || attrData?.order_items || attrData?.details || [];
 
@@ -85,43 +86,46 @@ export default function DetailPesananPage() {
       try { rawItems = JSON.parse(rawItems); } catch (e) { rawItems = []; }
     }
 
-    if (!Array.isArray(rawItems)) return [];
+    if (!Array.isArray(rawItems) || rawItems.length === 0) {
+      const singleMenu = attrData?.menu?.data?.attributes || attrData?.menu?.data || attrData?.menu;
+      if (singleMenu) {
+        rawItems = [{ menu: singleMenu }];
+      } else {
+        return [];
+      }
+    }
 
     return rawItems.map((it: any) => {
       const itemAttr = it.attributes || it;
       const menuRel = itemAttr.menu?.data?.attributes || itemAttr.menu?.data || itemAttr.menu || {};
 
-      let name = menuRel.name || menuRel.nama || itemAttr.name || itemAttr.nama;
-      let price = Number(menuRel.price || menuRel.harga || itemAttr.price || itemAttr.harga || 0);
+      // 1. PRIORITAS UTAMA: Nama & Harga langsung dari data order item yang dikirim frontend
+      let name = itemAttr.name || itemAttr.nama || itemAttr.title || menuRel.name || menuRel.nama;
+      let price = Number(itemAttr.price || itemAttr.harga || menuRel.price || menuRel.harga || 0);
       const quantity = Number(itemAttr.quantity || itemAttr.qty || 1);
-      let rawImg = menuRel.image || menuRel.gambar || itemAttr.image || itemAttr.gambar;
+      let rawImg = itemAttr.image || itemAttr.gambar || menuRel.image || menuRel.gambar;
 
-      const itemId = itemAttr.id || menuRel.id || itemAttr.menu_id;
+      const itemId = itemAttr.menu_id || itemAttr.id || menuRel.id;
 
-      // Deep Matching ke Master Menu
-      if (allStrapiMenus.length > 0) {
-        const matched = allStrapiMenus.find((m: any) => {
-          const mAttr = m.attributes || m;
-          return String(m.id) === String(itemId) || String(mAttr.name || mAttr.nama || '').toLowerCase() === String(name || '').toLowerCase();
-        });
-        // console.log({ allStrapiMenus, attrData })
-        // console.log({ itemId })
+      // 2. FALLBACK TERAKHIR: Hanya jika nama/harga sama sekali TIDAK ada
+      if (allStrapiMenus.length > 0 && itemId && (!name || price === 0)) {
+        const matched = allStrapiMenus.find((m: any) => String(m.id) === String(itemId));
 
         if (matched) {
           const mAttr = matched.attributes || matched;
-          if (!name || name === 'Makanan') name = mAttr.name || mAttr.nama;
+          if (!name) name = mAttr.name || mAttr.nama;
           if (price === 0) price = Number(mAttr.price || mAttr.harga || 0);
           if (!rawImg) rawImg = mAttr.image || mAttr.gambar;
         }
       }
 
       return {
-        id: itemId,
-        name: name,
+        id: itemId || Math.random(),
+        name: name || 'Menu Kantin',
         price: price,
         quantity: quantity,
         image: getImageUrl(rawImg),
-        notes: itemAttr.notes || itemAttr.note || itemAttr.catatan || '',
+        notes: itemAttr.notes || itemAttr.note || itemAttr.catatan || attrData.catatan || '',
       };
     });
   };
@@ -139,8 +143,8 @@ export default function DetailPesananPage() {
       const query: Record<string, string> = {
         populate: '*',
         'pagination[pageSize]': '10000'
-      }
-      const queryString = new URLSearchParams(query).toString()
+      };
+      const queryString = new URLSearchParams(query).toString();
       const [resOrders, resMenus] = await Promise.all([
         fetch(`${STRAPI_URL}/api/orders?populate=*`, { cache: 'no-store' }),
         fetch(`${STRAPI_URL}/api/menus?${queryString}`).catch(() => null)
@@ -240,8 +244,6 @@ export default function DetailPesananPage() {
           selesai: normStatus === 'Selesai' ? `${formattedOrderDate} ${userPickupTime}` : undefined,
         }
       };
-
-      console.log({ foundOrder })
     }
 
     setOrder(foundOrder);
@@ -261,15 +263,13 @@ export default function DetailPesananPage() {
   const updateOrderStatus = async (newStatus: StatusType) => {
     if (!order) return;
 
-    console.log({ order })
-
     const strapiSlugStatus =
       newStatus === 'Sedang Disiapkan' ? 'sedang_disiapkan' :
         newStatus === 'Siap Diambil' ? 'siap_diambil' :
           newStatus === 'Selesai' ? 'selesai' : 'pending';
 
     try {
-      await fetch(`${STRAPI_URL}/api/orders/${order.documentId}`, {
+      await fetch(`${STRAPI_URL}/api/orders/${order.documentId || order.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
