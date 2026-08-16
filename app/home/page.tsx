@@ -120,20 +120,20 @@ export default function HomePage() {
   // 2. Filter Rekomendasi / Search Real-Time
   const displayedMenus = useMemo(() => {
     if (!searchTerm.trim()) {
-      // Jika tidak mencari: Filter 3 menu spesifik (Es Teh, Rencang, Batagor)
-      const priorityNames = ['es teh', 'rencang', 'batagor'];
+      // Jika tidak mencari: Filter 4 menu spesifik (Es Teh, Rencang, Batagor)
+      const priorityNames = ['es teh', 'rencang', 'batagor', 'matcha'];
       const prioritized = menus.filter((menu) => {
         const name = menu.name?.toLowerCase() || '';
         return priorityNames.some((key) => name.includes(key));
       });
 
-      // Jika menu spesifik ditemukan kurang dari 3, tambahkan sisa menu lain sebagai fallback
-      if (prioritized.length < 3) {
+      // Jika menu spesifik ditemukan kurang dari 4, tambahkan sisa menu lain sebagai fallback
+      if (prioritized.length < 4) {
         const remaining = menus.filter((m) => !prioritized.includes(m));
-        return [...prioritized, ...remaining].slice(0, 3);
+        return [...prioritized, ...remaining].slice(0, 4);
       }
 
-      return prioritized.slice(0, 3);
+      return prioritized.slice(0, 4);
     }
 
     // Jika sedang mencari: Tampilkan SEMUA menu yang cocok dengan kata kunci
