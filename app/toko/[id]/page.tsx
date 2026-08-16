@@ -6,7 +6,7 @@ import { useRouter, useParams } from 'next/navigation';
 
 const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
 
-// ─── HELPER FUNCTIONS — di luar komponen ─────────────────────────────────────
+// ─── HELPER FUNCTIONS ────────────────────────────────────────────────────────
 
 function getStoreBannerUrl(tenantData: any): string {
   if (!tenantData) return '';
@@ -38,26 +38,23 @@ function getMenuProductUrl(menuData: any): string {
   return url.startsWith('http') ? url : `${STRAPI_URL}${url.startsWith('/') ? '' : '/'}${url}`;
 }
 
-// ─── KOMPONEN ─────────────────────────────────────────────────────────────────
+// ─── KOMPONEN UTAMA ──────────────────────────────────────────────────────────
 
 export default function TokoDetailPage() {
   const router = useRouter();
   const params = useParams();
 
-  // Stabilkan tenantId sebagai string primitif — primitif stabil di dep array
   const tenantId = params?.id ? String(params.id) : '';
 
   const [tenant, setTenant] = useState<any>(null);
   const [menus, setMenus] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Ref untuk cancel fetch jika komponen unmount sebelum selesai
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!tenantId) return;
 
-    // Cancel request sebelumnya jika ada
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -68,8 +65,10 @@ export default function TokoDetailPage() {
     async function fetchTenantData() {
       setLoading(true);
       try {
-        // 1. Fetch detail toko berdasarkan documentId
-        const resHome = await fetch(
+        let fetchedTenant: any = null;
+
+        // 1. Fetch detail toko (coba dari homes dulu, jika gagal coba tenants)
+        let resHome = await fetch(
           `${STRAPI_URL}/api/homes?filters[documentId][$eq]=${tenantId}&populate=*`,
           { signal }
         );
@@ -77,30 +76,74 @@ export default function TokoDetailPage() {
 
         if (resHome.ok) {
           const dataHome = await resHome.json();
-          // Strapi v5: flat object
-          setTenant(dataHome?.data?.[0] || null);
+          fetchedTenant = dataHome?.data?.[0] || null;
         }
 
-        // 2. Fetch menu milik toko ini — coba field tenant dulu (dengan populate lengkap)
-        let menuUrl = `${STRAPI_URL}/api/menus?filters[tenant][documentId][$eq]=${tenantId}&populate[image]=*&populate[tenant]=*&pagination[pageSize]=100`;
-        let resMenus = await fetch(menuUrl, { signal });
-        if (cancelled) return;
+        if (!fetchedTenant) {
+          // Fallback jika toko di-manage di endpoint /api/tenants
+          const resTenant = await fetch(
+            `${STRAPI_URL}/api/tenants?filters[documentId][$eq]=${tenantId}&populate=*`,
+            { signal }
+          );
+          if (resTenant.ok) {
+            const dataTenant = await resTenant.json();
+            fetchedTenant = dataTenant?.data?.[0] || null;
+          }
+        }
 
-        let dataMenus = resMenus.ok ? await resMenus.json() : { data: [] };
+        setTenant(fetchedTenant);
 
-        if (!dataMenus?.data?.length) {
-          // Fallback: coba relasi field "home"
-          menuUrl = `${STRAPI_URL}/api/menus?filters[home][documentId][$eq]=${tenantId}&populate[image]=*&populate[home]=*&pagination[pageSize]=100`;
-          resMenus = await fetch(menuUrl, { signal });
+        const realNumericId = fetchedTenant?.id;
+
+        // 2. Fetch Menus dengan mencoba beberapa variasi filter relasi
+        const filterQueries = [
+          `filters[tenant][documentId][$eq]=${tenantId}`,
+          `filters[home][documentId][$eq]=${tenantId}`,
+          `filters[tenants][documentId][$eq]=${tenantId}`,
+          `filters[homes][documentId][$eq]=${tenantId}`,
+        ];
+
+        if (realNumericId) {
+          filterQueries.push(
+            `filters[tenant][id][$eq]=${realNumericId}`,
+            `filters[home][id][$eq]=${realNumericId}`
+          );
+        }
+
+        let foundMenus: any[] = [];
+
+        for (const filter of filterQueries) {
+          const menuUrl = `${STRAPI_URL}/api/menus?${filter}&populate=*&pagination[pageSize]=100`;
+          const resMenus = await fetch(menuUrl, { signal });
           if (cancelled) return;
-          dataMenus = resMenus.ok ? await resMenus.json() : { data: [] };
+
+          if (resMenus.ok) {
+            const dataMenus = await resMenus.json();
+            if (dataMenus?.data?.length > 0) {
+              foundMenus = dataMenus.data;
+              break; // Hentikan loop jika menu sudah ditemukan
+            }
+          }
+        }
+
+        // Fallback terakhir: jika tetap tidak ketemu, ambil semua menu lalu filter di frontend
+        if (!foundMenus.length) {
+          const resAll = await fetch(`${STRAPI_URL}/api/menus?populate=*&pagination[pageSize]=100`, { signal });
+          if (resAll.ok) {
+            const dataAll = await resAll.json();
+            const allMenus = dataAll?.data || [];
+            foundMenus = allMenus.filter((m: any) => {
+              const tDocId = m.tenant?.documentId || m.home?.documentId || m.tenants?.[0]?.documentId;
+              const tId = m.tenant?.id || m.home?.id;
+              return tDocId === tenantId || (realNumericId && tId === realNumericId);
+            });
+          }
         }
 
         if (!cancelled) {
-          setMenus(dataMenus?.data || []);
+          setMenus(foundMenus);
         }
       } catch (err: any) {
-        // AbortError bukan error nyata — abaikan
         if (err?.name !== 'AbortError') {
           console.error('Gagal mengambil data toko:', err);
         }
@@ -115,7 +158,7 @@ export default function TokoDetailPage() {
       cancelled = true;
       controller.abort();
     };
-  }, [tenantId]); // tenantId adalah string primitif — stabil, tidak trigger infinite loop
+  }, [tenantId]);
 
   if (loading) {
     return (
@@ -125,7 +168,6 @@ export default function TokoDetailPage() {
     );
   }
 
-  // Strapi v5: flat object, tidak ada .attributes
   const storeName = tenant?.name || tenant?.nama || 'Toko Kami';
   const storeBannerImg = getStoreBannerUrl(tenant || {});
 
@@ -156,7 +198,7 @@ export default function TokoDetailPage() {
           )}
         </div>
 
-        {/* TITLE MENU KAMI */}
+        {/* DAFTAR MENU TOKO */}
         <section className="mt-8 sm:mt-10">
           <h2 className="text-2xl sm:text-3xl font-serif font-medium text-gray-900 mb-6">
             Menu Kami
@@ -165,7 +207,6 @@ export default function TokoDetailPage() {
           {menus.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {menus.map((menu: any) => {
-                // Strapi v5: flat, tidak ada .attributes
                 const menuImgSrc = getMenuProductUrl(menu);
                 const menuName = menu.name || menu.nama || 'Nama Menu';
                 const menuPrice = Number(menu.price || 0);
@@ -173,7 +214,7 @@ export default function TokoDetailPage() {
 
                 return (
                   <div
-                    key={menu.id}
+                    key={menu.documentId || menu.id}
                     className="flex items-center gap-4 sm:gap-6 rounded-[28px] border border-gray-100 bg-white p-4 sm:p-5 shadow-sm transition-all hover:shadow-md"
                   >
                     <div className="h-28 w-28 sm:h-32 sm:w-32 flex-shrink-0 overflow-hidden rounded-2xl bg-gray-100">

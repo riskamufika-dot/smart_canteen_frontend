@@ -8,14 +8,11 @@ const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337'
 
 interface OrderItem {
   id?: number | string;
-  name?: string;
-  nama?: string;
-  price?: number;
-  harga?: number;
-  quantity?: number;
-  qty?: number;
+  name: string;
+  price: number;
+  quantity: number;
   notes?: string;
-  note?: string;
+  subtotal: number;
 }
 
 interface OrderData {
@@ -25,6 +22,7 @@ interface OrderData {
   updatedAt?: string;
   status?: string;
   totalPrice?: number;
+  totalItem?: number;
   items?: OrderItem[];
   pickupDate?: string;
   pickupTime?: string;
@@ -36,77 +34,86 @@ export default function StatusPesananPage() {
   const [order, setOrder] = useState<OrderData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // PARSER ITEM PESANAN FIX (TIDAK MENIMPA DENGAN ID SEBLAK)
-  const parseItems = (rawItemsInput: any, masterMenus: any[] = []): OrderItem[] => {
-    let parsed: any[] = [];
-    if (!rawItemsInput) return [];
+  // DEEP PARSER: Mengekstrak nama & harga asli dari berbagai variasi struktur Strapi & LocalStorage
+  const extractItemsFromRaw = (rawInput: any, masterMenus: any[] = []): OrderItem[] => {
+    let itemsArray: any[] = [];
 
-    if (typeof rawItemsInput === 'string') {
-      try { parsed = JSON.parse(rawItemsInput); } catch (e) { parsed = []; }
-    } else if (Array.isArray(rawItemsInput)) {
-      parsed = rawItemsInput;
+    if (!rawInput) return [];
+
+    if (typeof rawInput === 'string') {
+      try {
+        itemsArray = JSON.parse(rawInput);
+      } catch (e) {
+        itemsArray = [];
+      }
+    } else if (Array.isArray(rawInput)) {
+      itemsArray = rawInput;
+    } else if (typeof rawInput === 'object') {
+      itemsArray = [rawInput];
     }
 
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(itemsArray) || itemsArray.length === 0) return [];
 
-    return parsed.map((it: any) => {
+    return itemsArray.map((it: any, idx: number) => {
       const attr = it.attributes || it;
-      const menuObj = attr.menu?.data?.attributes || attr.menu?.data || attr.menu || {};
+      const menuObj = attr.menu?.data?.attributes || attr.menu?.data || attr.menu || attr.menu_item || {};
 
-      // Prioritaskan nama & harga yang tersimpan di item pesanan itu sendiri
-      let name = attr.name || attr.nama || attr.title || menuObj.name || menuObj.nama;
-      let price = Number(attr.price || attr.harga || menuObj.price || menuObj.harga || 0);
-      const quantity = Number(attr.quantity || attr.qty || attr.jumlah || 1);
-      const notes = attr.notes || attr.note || attr.catatan || '';
+      // 1. Ekstrak Nama (mencari semua kemungkinan key)
+      let name =
+        attr.name ||
+        attr.nama ||
+        attr.nama_menu ||
+        attr.menu_name ||
+        attr.title ||
+        menuObj.name ||
+        menuObj.nama ||
+        menuObj.title ||
+        '';
 
-      const itemId = attr.menu_id || attr.id || menuObj.id;
+      // 2. Ekstrak Harga (mencari semua kemungkinan key)
+      let price = Number(
+        attr.price ??
+        attr.harga ??
+        attr.harga_satuan ??
+        attr.unit_price ??
+        menuObj.price ??
+        menuObj.harga ??
+        0
+      );
 
-      // Pencocokan ke Master Menu hanya jika ID-nya jelas dan nama/harga belum ada
+      const quantity = Number(attr.quantity ?? attr.qty ?? attr.jumlah ?? 1) || 1;
+      const notes = attr.notes || attr.catatan || attr.note || '';
+
+      const itemId = attr.menu_id ?? attr.menuId ?? attr.id ?? menuObj.id;
+
+      // 3. Jika nama/harga masih 0, cari di master menu Strapi berdasarkan ID
       if (masterMenus.length > 0 && itemId && (!name || price === 0)) {
-        const matched = masterMenus.find((m: any) => String(m.id) === String(itemId));
-
+        const matched = masterMenus.find((m: any) => String(m.id || m.documentId) === String(itemId));
         if (matched) {
           const mAttr = matched.attributes || matched;
-          if (!name) name = mAttr.name || mAttr.nama;
+          if (!name) name = mAttr.name || mAttr.nama || mAttr.title || '';
           if (price === 0) price = Number(mAttr.price || mAttr.harga || 0);
         }
       }
 
       return {
-        ...attr,
-        name: name || 'Makanan Kantin',
+        id: attr.id || idx,
+        name: name || 'Menu Kantin',
         price: price,
         quantity: quantity,
-        notes: notes,
+        notes,
+        subtotal: price * quantity,
       };
     });
   };
 
-  // NORMALISASI STATUS PESANAN AGAR KONSISTEN
   const normalizeStatus = (rawStatus: any): 'menunggu' | 'proses' | 'siap' | 'selesai' => {
     if (!rawStatus) return 'menunggu';
-
     const s = String(rawStatus).toLowerCase().trim().replace(/_/g, ' ');
 
-    if (s.includes('selesai') || s.includes('complete') || s.includes('done') || s.includes('finish')) {
-      return 'selesai';
-    }
-
-    if (
-      s.includes('disiapkan') || 
-      s.includes('proses') || 
-      s.includes('prepare') || 
-      s.includes('progres') ||
-      s.includes('masak') ||
-      s.includes('buat')
-    ) {
-      return 'proses';
-    }
-
-    if (s.includes('siap') || s.includes('ready') || s.includes('dijemput') || s.includes('takeaway')) {
-      return 'siap';
-    }
-
+    if (s.includes('selesai') || s.includes('complete') || s.includes('done')) return 'selesai';
+    if (s.includes('disiapkan') || s.includes('proses') || s.includes('prepare') || s.includes('masak')) return 'proses';
+    if (s.includes('siap') || s.includes('ready') || s.includes('dijemput')) return 'siap';
     return 'menunggu';
   };
 
@@ -126,8 +133,31 @@ export default function StatusPesananPage() {
       }
     } catch (e) {}
 
+    // A. BACA DULU DARI LOCALSTORAGE
+    let localBackupItems: OrderItem[] = [];
+    let localTotalPrice = 0;
+    if (typeof window !== 'undefined') {
+      try {
+        const localOrders = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
+        const matchedLocal = localOrders.find((o: any) => {
+          const docId = String(o.documentId || '');
+          const idStr = String(o.id || '');
+          const oId = String(o.orderId || o.order_id || '').replace('#', '').trim();
+          return docId === cleanOrderId || idStr === cleanOrderId || oId === cleanOrderId;
+        }) || localOrders[localOrders.length - 1];
+
+        if (matchedLocal) {
+          if (matchedLocal.items) {
+            localBackupItems = extractItemsFromRaw(matchedLocal.items, masterMenus);
+          }
+          localTotalPrice = Number(matchedLocal.totalPrice || matchedLocal.total_price || 0);
+        }
+      } catch (e) {}
+    }
+
+    // B. FETCH DATA DARI STRAPI
     try {
-      const fetchUrl = `${STRAPI_URL}/api/orders?filters[order_id][$contains]=${searchId}&populate=*`;
+      const fetchUrl = `${STRAPI_URL}/api/orders?filters[$or][0][order_id][$contains]=${searchId}&filters[$or][1][documentId][$eq]=${cleanOrderId}&populate=*`;
       const res = await fetch(fetchUrl, { cache: 'no-store' });
 
       if (res.ok) {
@@ -136,28 +166,42 @@ export default function StatusPesananPage() {
 
         if (ordersList.length > 0) {
           const raw = ordersList[0];
-          const attr = raw.attributes ? { ...raw.attributes, id: raw.id } : raw;
+          const attr = raw.attributes ? { ...raw.attributes, id: raw.id, documentId: raw.documentId } : raw;
 
-          const parsedItems = parseItems(attr.items || attr.order_items || attr.details, masterMenus);
+          let parsedItems = extractItemsFromRaw(attr.items || attr.order_items || attr.details || attr.menu_items, masterMenus);
 
-          const calculatedTotal = parsedItems.reduce(
+          // Gunakan cadangan LocalStorage jika Strapi mengembalikan item kosong
+          if ((parsedItems.length === 0 || (parsedItems.length === 1 && parsedItems[0].price === 0)) && localBackupItems.length > 0) {
+            parsedItems = localBackupItems;
+          }
+
+          // Hitung total bayar murni berdasarkan akumulasi item
+          let calculatedTotal = parsedItems.reduce(
             (sum: number, it: OrderItem) => sum + (Number(it.price || 0) * Number(it.quantity || 1)),
             0
           );
 
-          const rawStatus = attr.status || attr.status_pesanan || attr.menu_status || '';
+          const finalTotalPrice = calculatedTotal > 0 ? calculatedTotal : Number(attr.total_price || attr.totalPrice || localTotalPrice);
+
+          // Jika total bayar ada tetapi harga per item masih 0, bagikan secara proporsional
+          if (parsedItems.length === 1 && parsedItems[0].price === 0 && finalTotalPrice > 0) {
+            parsedItems[0].price = finalTotalPrice / parsedItems[0].quantity;
+            parsedItems[0].subtotal = finalTotalPrice;
+          }
+
+          const rawStatus = attr.menu_status || attr.status || attr.status_pesanan || '';
           const normStatus = normalizeStatus(rawStatus);
 
           latestData = {
-            id: raw.id,
+            id: raw.documentId || raw.id,
             orderId: attr.order_id || attr.orderId || `#SC-${raw.id}`,
             createdAt: attr.createdAt || new Date().toISOString(),
             updatedAt: attr.updatedAt || new Date().toISOString(),
             status: normStatus,
-            totalPrice: Number(attr.total_price || attr.totalPrice) || calculatedTotal,
+            totalPrice: finalTotalPrice,
             items: parsedItems,
             pickupDate: attr.pickup_date || attr.pickupDate || '-',
-            pickupTime: attr.pickup_time || attr.pickupTime || '06.15 WIB',
+            pickupTime: attr.pickup_time || attr.pickupTime || '-',
             paymentMethod: String(attr.payment_method || attr.paymentMethod || 'CASH').toUpperCase(),
           };
         }
@@ -174,7 +218,6 @@ export default function StatusPesananPage() {
 
   useEffect(() => {
     fetchLatestOrder();
-
     const intervalId = setInterval(() => {
       fetchLatestOrder();
     }, 3000);
@@ -362,7 +405,7 @@ export default function StatusPesananPage() {
           </div>
         </div>
 
-        {/* RINCIAN ITEM PESANAN */}
+        {/* RINCIAN ITEM PESANAN AKURAT */}
         <div className="bg-[#FFF8EE] border border-orange-200/80 rounded-3xl p-5 sm:p-6 space-y-4 shadow-xs w-full">
           <h3 className="text-base sm:text-lg font-bold text-gray-900 pb-2 border-b border-orange-200/60">
             Detail Pesanan
@@ -371,10 +414,10 @@ export default function StatusPesananPage() {
           <div className="space-y-3">
             {order.items && Array.isArray(order.items) && order.items.length > 0 ? (
               order.items.map((item, index) => {
-                const name = item.name || item.nama || 'Makanan';
-                const qty = Number(item.quantity || item.qty) || 1;
-                const price = Number(item.price || item.harga) || 0;
-                const note = item.notes || item.note;
+                const name = item.name;
+                const qty = Number(item.quantity) || 1;
+                const price = Number(item.price) || 0;
+                const note = item.notes;
 
                 return (
                   <div key={index} className="flex flex-col gap-1 border-b border-orange-100/60 last:border-none pb-2 last:pb-0">

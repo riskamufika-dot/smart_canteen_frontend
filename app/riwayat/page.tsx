@@ -1,375 +1,337 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Bell, Star, RefreshCw } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-// CONFIG STRAPI URL LOKAL TANPA FILE LIB
+/* ==========================================================================
+   1. TYPESCRIPT INTERFACES
+   ========================================================================== */
+
+export interface Tenant {
+  documentId: string;
+  name: string;
+  rating?: number;
+  benner?: { url: string }; // 🟢 Field gambar tenant di Strapi bernama 'banner'
+}
+
+export interface Menu {
+  documentId: string;
+  name: string;
+  price: number;
+  image?: { url: string }; // 🟢 Field gambar menu bernama 'image'
+}
+
+export interface OrderItem {
+  documentId: string;
+  quantity: number;
+  price: number;
+  menu?: Menu;
+}
+
+export interface Order {
+  documentId: string;
+  order_id?: string;
+  status_pesanan?: string;
+  menu_status?: string;
+  total_price?: number;
+  rating?: number;
+  tenant?: Tenant;
+  items?: OrderItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/* ==========================================================================
+   2. STRAPI V5 API FETCHERS
+   ========================================================================== */
+
 const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
 
-interface OrderItem {
-  id?: number | string;
-  name?: string;
-  nama?: string;
-  price?: number;
-  harga?: number;
-  quantity?: number;
+async function fetchOrderHistory(userDocId?: string): Promise<Order[]> {
+  const queryParts: string[] = [
+    // 🟢 Populate field 'banner' di Tenant
+    `populate[tenant][populate][0]=benner`,
+    
+    // 🟢 Populate field 'image' di Menu
+    `populate[items][populate][menu][populate][0]=image`,
+    
+    // Populate user
+    `populate[user][fields][0]=username`,
+    `populate[user][fields][1]=email`,
+    
+    // Filter HANYA pesanan berstatus "Selesai"
+    `filters[menu_status][$eq]=Selesai`,
+
+    // Urutkan transaksi terbaru ke terlama
+    `sort[0]=createdAt:desc`,
+  ];
+
+  if (userDocId) {
+    queryParts.push(`filters[user][documentId][$eq]=${userDocId}`);
+  }
+
+  const queryString = queryParts.join('&');
+  const url = `${STRAPI_URL}/api/orders?${queryString}`;
+
+  const res = await fetch(url, {
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    throw new Error(errorData?.error?.message || `Gagal mengambil data`);
+  }
+
+  const json = await res.json();
+  return json.data || [];
 }
 
-interface OrderData {
-  id?: number | string;
-  orderId?: string;
-  createdAt?: string;
-  status?: string;
-  totalPrice?: number;
-  items?: OrderItem[];
-  tenantId?: number | string;
-  tenantName?: string;
-  tenantImage?: string;
-  tenantRating?: string | number;
-  userRating?: number;
+async function submitOrderRating(orderDocumentId: string, rating: number): Promise<void> {
+  const res = await fetch(`${STRAPI_URL}/api/orders/${orderDocumentId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      data: { rating },
+    }),
+  });
+
+  if (!res.ok) throw new Error('Gagal menyimpan penilaian.');
 }
+
+/* ==========================================================================
+   3. HALAMAN UTAMA RIWAYAT
+   ========================================================================== */
 
 export default function RiwayatPage() {
   const router = useRouter();
-  const [historyOrders, setHistoryOrders] = useState<OrderData[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [ratingLoading, setRatingLoading] = useState<string | number | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const defaultTenantImage =
-    'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=600&q=80';
+  const CURRENT_USER_DOC_ID = ""; 
 
-  const fetchHistoryOrders = async () => {
-    setLoading(true);
-    let orders: OrderData[] = [];
-
-    // 1. Ambil Data dari LocalStorage khusus Riwayat terlebih dahulu
+  const loadOrders = async () => {
     try {
-      const historyLocal = JSON.parse(localStorage.getItem('smart_canteen_history') || '[]');
-      const savedOrders = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
-
-      const mergedLocal = [...historyLocal, ...savedOrders];
-      const localFormatted = mergedLocal.map((raw: any) => {
-        const data = raw.data || raw;
-        return {
-          id: data.id || data.orderId,
-          orderId: data.orderId || data.order_id || `#SC-${data.id || 1}`,
-          createdAt: data.createdAt || new Date().toISOString(),
-          status: data.status || 'Selesai',
-          totalPrice: Number(data.totalPrice || data.total_price) || 0,
-          items: Array.isArray(data.items) ? data.items : [],
-          tenantId: data.tenantId || 1,
-          tenantName: data.tenantName || 'Kantin Sekolah',
-          tenantImage: defaultTenantImage,
-          tenantRating: '4.8',
-          userRating: Number(data.rating || data.userRating) || 0,
-        };
-      });
-
-      orders = localFormatted;
-    } catch (e) {
-      console.error('Gagal membaca LocalStorage riwayat:', e);
+      setLoading(true);
+      setError(null);
+      const data = await fetchOrderHistory(CURRENT_USER_DOC_ID || undefined);
+      setOrders(data);
+    } catch (err: any) {
+      setError(err.message || 'Terjadi kesalahan saat memuat data');
+    } finally {
+      setLoading(false);
     }
-
-    // 2. Ambil dari Strapi Backend jika online
-    try {
-      const res = await fetch(`${STRAPI_URL}/api/orders?sort[0]=createdAt:desc&populate=*`);
-
-      if (res.ok) {
-        const result = await res.json();
-        const rawData = result.data || [];
-
-        const strapiOrders = rawData.map((item: any) => {
-          const attr = item.attributes ? { ...item.attributes, id: item.id } : item;
-          return {
-            id: item.id,
-            orderId: attr.order_id || attr.orderId || `#SC-${item.id}`,
-            createdAt: attr.createdAt || new Date().toISOString(),
-            status: attr.menu_status || attr.status || 'Selesai',
-            totalPrice: Number(attr.total_price || attr.totalPrice) || 0,
-            items: Array.isArray(attr.items) ? attr.items : [],
-            tenantId: attr.tenant_id || attr.tenantId || 1,
-            tenantName: attr.tenant_name || attr.tenantName || 'Kantin Sekolah',
-            tenantImage: attr.tenant_image || defaultTenantImage,
-            tenantRating: attr.tenant_rating || '4.8',
-            userRating: Number(attr.rating || attr.userRating) || 0,
-          };
-        });
-
-        if (strapiOrders.length > 0) {
-          orders = strapiOrders;
-        }
-      }
-    } catch (err) {
-      console.warn('Backend Strapi offline, menggunakan data riwayat dari LocalStorage.');
-    }
-
-    // Filter hanya yang berstatus Selesai atau Dibatalkan
-    const filtered = orders.filter((o) =>
-      ['selesai', 'dibatalkan', 'Selesai', 'Dibatalkan', 'siap_diambil', 'siap diambil'].includes(o.status || '')
-    );
-
-    setHistoryOrders(filtered);
-    setLoading(false);
   };
 
   useEffect(() => {
-    fetchHistoryOrders();
+    loadOrders();
   }, []);
 
-  const handleRating = async (orderItem: OrderData, ratingValue: number) => {
-    const targetOrderKey = orderItem.id || orderItem.orderId;
-    if (!targetOrderKey) return;
-
-    setRatingLoading(targetOrderKey);
-
-    // 1. Update Tampilan Bintang di UI
-    setHistoryOrders((prev) =>
-      prev.map((ord) =>
-        ord.id === orderItem.id || ord.orderId === orderItem.orderId
-          ? { ...ord, userRating: ratingValue }
-          : ord
-      )
-    );
-
-    // 2. Simpan di LocalStorage
-    try {
-      const savedRatings = JSON.parse(localStorage.getItem('canteen_user_ratings') || '{}');
-      savedRatings[targetOrderKey] = ratingValue;
-      localStorage.setItem('canteen_user_ratings', JSON.stringify(savedRatings));
-    } catch (e) {
-      console.error('Gagal menyimpan rating lokal:', e);
-    }
-
-    // 3. Kirim Update Rating ke Endpoint Strapi "homes"
-    try {
-      const tenantId = orderItem.tenantId;
-
-      if (tenantId) {
-        const numericHomeId = typeof tenantId === 'string' ? tenantId.replace(/\D/g, '') : tenantId;
-
-        if (numericHomeId) {
-          const res = await fetch(`${STRAPI_URL}/api/homes/${numericHomeId}`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              data: {
-                rating: Number(ratingValue),
-              },
-            }),
-          });
-
-          if (res.ok) {
-            console.log(`✅ Rating ${ratingValue} berhasil dikirim ke Home/Tenant ID: ${numericHomeId}`);
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('⚠️ Server offline, rating tersimpan lokal.');
-    } finally {
-      setRatingLoading(null);
-    }
-  };
-
-  const handleBeliLagi = (order: OrderData) => {
-    if (order.tenantId) {
-      router.push(`/toko/${order.tenantId}`);
+  // 🟢 Beli Lagi mengarahkan ke halaman Detail Menu jika ID ditemukan
+  const handleBuyAgain = (menuDocId?: string) => {
+    if (menuDocId) {
+      router.push(`/menu/${menuDocId}`);
     } else {
-      router.push('/home');
+      router.push('/menu');
     }
   };
 
-  const formatDate = (dateStr?: string) => {
-    if (!dateStr) return '02 Agustus 2026, 08:50';
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return dateStr;
-
-    const formattedDate = date.toLocaleDateString('id-ID', {
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric',
-    });
-    const formattedTime = date
-      .toLocaleTimeString('id-ID', {
-        hour: '2-digit',
-        minute: '2-digit',
-      })
-      .replace('.', ':');
-
-    return `${formattedDate}, ${formattedTime}`;
-  };
-
-  const formatMenuSummary = (items: OrderItem[]) => {
-    if (!items || items.length === 0) return 'Pesanan Makanan';
-    return items
-      .map((it) => `${it.quantity || 1} ${it.name || it.nama || 'Menu'}`)
-      .join(' + ');
+  const handleRateOrder = async (orderDocumentId: string, rating: number) => {
+    try {
+      await submitOrderRating(orderDocumentId, rating);
+      setOrders((prev) =>
+        prev.map((ord) =>
+          ord.documentId === orderDocumentId ? { ...ord, rating } : ord
+        )
+      );
+    } catch {
+      alert('Gagal memperbarui rating.');
+    }
   };
 
   return (
-    <div className="w-full min-h-screen bg-gray-50/50 font-sans text-gray-900 pb-20">
-      
-      {/* HEADER */}
-      <header className="w-full bg-white border-b border-gray-100 px-4 py-4 sticky top-0 z-30 shadow-xs">
-        <div className="w-full flex items-center justify-between">
-          <button
-            onClick={() => router.push('/home')}
-            className="text-gray-900 hover:text-green-600 transition-colors p-1.5 -ml-1 rounded-full hover:bg-gray-100 cursor-pointer"
+    <div className="w-full min-h-screen bg-white p-4 md:p-8">
+      <div className="w-full max-w-full mx-auto">
+        
+        {/* Header Navigation */}
+        <div className="mb-6 flex items-center justify-between">
+          <button 
+            onClick={() => router.back()} 
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-50 border border-gray-100 shadow-sm hover:bg-gray-100 transition"
           >
-            <ArrowLeft size={22} />
+            <svg className="h-5 w-5 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
+            </svg>
           </button>
-
-          <h1 className="text-lg font-bold text-gray-900 tracking-tight">
-            Riwayat
-          </h1>
-
-          <div className="flex items-center gap-1">
-            <button
-              onClick={fetchHistoryOrders}
-              className="text-gray-600 hover:text-green-600 transition-colors p-1.5 rounded-full hover:bg-gray-100 cursor-pointer"
-              title="Perbarui Data"
+          <h1 className="text-xl font-bold text-gray-900">Riwayat</h1>
+          <div className="flex items-center space-x-2">
+            <button 
+              onClick={loadOrders} 
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-50 border border-gray-100 shadow-sm hover:bg-gray-100 transition text-gray-700"
             >
-              <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
-            </button>
-            <button
-              className="text-gray-900 hover:text-green-600 transition-colors p-1.5 rounded-full hover:bg-gray-100 cursor-pointer"
-              title="Notifikasi"
-            >
-              <Bell size={20} />
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
             </button>
           </div>
         </div>
-      </header>
 
-      {/* KONTEN UTAMA */}
-      <main className="w-full px-4 py-5 space-y-4 max-w-4xl mx-auto">
-        {loading ? (
-          <div className="py-20 text-center text-gray-400">
-            <RefreshCw size={28} className="animate-spin mx-auto mb-2 text-green-500" />
-            <p className="text-xs font-medium">Memuat riwayat...</p>
+        {/* Loading State */}
+        {loading && (
+          <div className="space-y-4 w-full">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-36 w-full animate-pulse rounded-2xl bg-gray-100" />
+            ))}
           </div>
-        ) : historyOrders.length > 0 ? (
-          historyOrders.map((order, orderIdx) => {
-            const normStat = (order.status || '').toLowerCase();
-            const isSelesai = normStat === 'selesai' || normStat === 'siap_diambil' || normStat === 'siap diambil';
-            const orderKey = order.id || order.orderId || orderIdx;
-            const currentRating = order.userRating || 0;
-            const totalItemsCount = (order.items || []).reduce(
-              (sum, item) => sum + (item.quantity || 1),
-              0
-            );
+        )}
 
-            return (
-              <div
-                key={orderKey}
-                className="w-full bg-white rounded-3xl p-5 shadow-xs border border-gray-100 flex flex-col gap-4"
-              >
-                {/* BARIS ATAS: GAMBAR + INFO LENGKAP */}
-                <div className="flex items-start gap-4">
-                  {/* GAMBAR TENANT DENGAN BADGE RATING */}
-                  <div className="relative shrink-0 w-28 h-28 sm:w-32 sm:h-32 rounded-2xl overflow-hidden bg-gray-100">
-                    <img
-                      src={order.tenantImage}
-                      alt={order.tenantName || 'Kantin'}
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = defaultTenantImage;
-                      }}
-                    />
-                    <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur-xs px-2.5 py-0.5 rounded-full shadow-xs flex items-center gap-1 border border-gray-100">
-                      <Star size={11} className="fill-amber-400 text-amber-400" />
-                      <span className="text-[11px] font-bold text-gray-900">
-                        {order.tenantRating || '4.8'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* INFO TEXT LENGKAP */}
-                  <div className="flex-1 min-w-0 flex flex-col space-y-1 text-left">
-                    {/* 1. NAMA TENANT */}
-                    <h2 className="text-lg font-bold text-gray-900 leading-tight truncate">
-                      {order.tenantName || 'Kantin Sekolah'}
-                    </h2>
-
-                    {/* 2. TANGGAL + STATUS SEJAJAR */}
-                    <p className="text-xs text-gray-400 font-medium">
-                      {formatDate(order.createdAt)}{' '}
-                      <span className="text-gray-400">.</span>{' '}
-                      <span className={isSelesai ? 'text-[#52C453] font-semibold' : 'text-red-500 font-semibold'}>
-                        {isSelesai ? 'Selesai' : 'Dibatalkan'}
-                      </span>
-                    </p>
-
-                    {/* 3. RINCIAN MENU */}
-                    <p className="text-xs font-semibold text-gray-800 pt-1 leading-snug">
-                      {formatMenuSummary(order.items || [])}
-                    </p>
-
-                    {/* 4. TOTAL HARGA */}
-                    <p className="text-sm font-bold text-gray-900 pt-0.5">
-                      Rp{Number(order.totalPrice || 0).toLocaleString('id-ID')}
-                    </p>
-
-                    {/* 5. JUMLAH MENU */}
-                    <p className="text-[11px] text-gray-400 font-medium">
-                      {totalItemsCount || (order.items || []).length || 1} Menu
-                    </p>
-                  </div>
-                </div>
-
-                {/* BARIS BAWAH: PENILAIAN & TOMBOL BELI LAGI */}
-                <div className="flex items-end justify-between pt-2 border-t border-gray-50">
-                  <div className="space-y-1">
-                    <span className="text-[11px] font-semibold text-gray-400 block">
-                      Beri Penilaian Mu
-                    </span>
-                    <div className="flex items-center gap-1">
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <button
-                          key={star}
-                          type="button"
-                          disabled={ratingLoading === orderKey}
-                          onClick={() => handleRating(order, star)}
-                          className="p-0.5 transition-transform active:scale-125 cursor-pointer disabled:opacity-50"
-                        >
-                          <Star
-                            size={18}
-                            className={
-                              star <= currentRating
-                                ? 'fill-amber-400 text-amber-400'
-                                : 'text-gray-300'
-                            }
-                          />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => handleBeliLagi(order)}
-                    className="bg-[#E2F7E3] hover:bg-[#d0f2d2] text-[#42B543] text-xs font-bold px-4 py-2 rounded-full transition-all active:scale-95 border border-[#d0f2d2] cursor-pointer"
-                  >
-                    Beli Lagi
-                  </button>
-                </div>
-              </div>
-            );
-          })
-        ) : (
-          <div className="py-20 text-center text-gray-400 space-y-3">
-            <p className="text-sm font-medium">Belum ada riwayat pesanan.</p>
+        {/* Error State */}
+        {error && !loading && (
+          <div className="w-full rounded-2xl bg-red-50 p-6 text-center text-red-600">
+            <p className="font-semibold">{error}</p>
             <button
-              onClick={() => router.push('/home')}
-              className="rounded-full bg-[#52C453] px-5 py-2 text-white font-bold text-xs hover:bg-[#43b044] transition-all cursor-pointer"
+              onClick={loadOrders}
+              className="mt-3 rounded-lg bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700"
             >
-              Cari Makanan
+              Coba Lagi
             </button>
           </div>
         )}
-      </main>
 
+        {/* Empty State */}
+        {!loading && !error && orders.length === 0 && (
+          <div className="w-full rounded-2xl bg-gray-50 border border-gray-100 p-12 text-center text-gray-500">
+            Belum ada riwayat pesanan yang selesai.
+          </div>
+        )}
+
+        {/* Order History List */}
+        {!loading && !error && orders.length > 0 && (
+          <div className="space-y-4 w-full">
+            {orders.map((order) => {
+              const status = order.menu_status || order.status_pesanan || 'Selesai';
+              const price = Number(order.total_price || 0);
+
+              // Ambil item & menu pertama
+              const firstItem = order.items?.[0];
+              const firstMenu = firstItem?.menu;
+              const firstMenuItemDocId = firstMenu?.documentId;
+
+              // Nama toko dari Strapi (jika kosong, fallback ke 'Toko')
+              const tenantName = order.tenant?.name || 'Toko';
+
+              // 🟢 Prioritas Gambar:
+              // 1. Gambar 'banner' milik Tenant
+              // 2. Gambar 'image' milik Menu makanan
+              const rawImageUrl = order.tenant?.benner?.url || firstMenu?.image?.url;
+
+              const imageUrl = rawImageUrl
+                ? (rawImageUrl.startsWith('http') ? rawImageUrl : `${STRAPI_URL}${rawImageUrl}`)
+                : 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=300&q=80';
+
+              const itemsSummary = order.items?.length
+                ? order.items.map((item) => `${item.quantity || 1} ${item.menu?.name || 'Menu'}`).join(' + ')
+                : 'Pesanan';
+
+              return (
+                <div 
+                  key={order.documentId} 
+                  className="w-full rounded-2xl bg-white p-4 md:p-5 shadow-sm border border-gray-200 flex gap-4 items-start justify-between"
+                >
+                  {/* SISI KIRI: Foto Toko & Detail Pesanan */}
+                  <div className="flex gap-4 items-start flex-1 min-w-0">
+                    
+                    {/* Foto Toko / Menu */}
+                    <div className="relative h-24 w-24 md:h-28 md:w-28 shrink-0 overflow-hidden rounded-xl bg-gray-100 border border-gray-100">
+                      <img
+                        src={imageUrl}
+                        alt={tenantName}
+                        className="h-full w-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=300&q=80';
+                        }}
+                      />
+                      <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex items-center gap-0.5 rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-bold text-gray-800 shadow-sm backdrop-blur-sm">
+                        <span className="text-amber-400">★</span>
+                        <span>{order.tenant?.rating || '4.8'}</span>
+                      </div>
+                    </div>
+
+                    {/* Rincian Teks */}
+                    <div className="flex flex-col justify-between min-w-0 flex-1 py-0.5">
+                      <div>
+                        <h2 className="text-base md:text-lg font-bold text-gray-900 truncate leading-snug">
+                          {tenantName}
+                        </h2>
+                        
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <p className="text-[11px] md:text-xs text-gray-400 font-medium">
+                            {new Date(order.createdAt).toLocaleDateString('id-ID', {
+                              day: 'numeric',
+                              month: 'long',
+                              year: 'numeric',
+                            })},{' '}
+                            {new Date(order.createdAt).toLocaleTimeString('id-ID', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            }).replace('.', ':')}
+                          </p>
+                          <span className="text-gray-300">•</span>
+                          <span className="text-[11px] md:text-xs font-semibold text-emerald-600">
+                            {status}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Detail Menu & Harga */}
+                      <div className="mt-1.5">
+                        <p className="text-xs md:text-sm text-gray-600 font-medium truncate">
+                          {itemsSummary}
+                        </p>
+                        <p className="text-sm md:text-base font-bold text-gray-900 mt-0.5">
+                          Rp{price.toLocaleString('id-ID')}
+                        </p>
+                      </div>
+
+                      {/* Penilaian Bintang Interaktif */}
+                      <div className="mt-2">
+                        <p className="text-[10px] md:text-xs font-semibold text-gray-500 mb-0.5">Beri Penilaian Mu</p>
+                        <div className="flex space-x-1">
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <button
+                              key={star}
+                              onClick={() => handleRateOrder(order.documentId, star)}
+                              className={`text-base md:text-lg leading-none transition-transform active:scale-125 ${
+                                star <= (order.rating || 0)
+                                  ? 'text-amber-400'
+                                  : 'text-gray-200 hover:text-amber-300'
+                              }`}
+                            >
+                              ★
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* SISI KANAN: Tombol Beli Lagi */}
+                  <div className="shrink-0 flex flex-col justify-start items-end">
+                    <button
+                      onClick={() => handleBuyAgain(firstMenuItemDocId)}
+                      className="rounded-full bg-emerald-50 px-4 md:px-5 py-1.5 text-xs md:text-sm font-semibold text-emerald-600 hover:bg-emerald-100 transition border border-emerald-200"
+                    >
+                      Beli Lagi
+                    </button>
+                  </div>
+
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
