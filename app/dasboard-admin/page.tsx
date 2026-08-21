@@ -66,12 +66,21 @@ export default function DashboardAdmin() {
     checkAuthAndFetchProfile();
   }, [router]);
 
-  // FUNGSI LOGOUT
+  // FUNGSI LOGOUT (DIPERBAIKI)
   const handleLogout = () => {
+    // 1. Hapus semua data auth dari localStorage
     localStorage.removeItem('token');
     localStorage.removeItem('jwt');
     localStorage.removeItem('user');
-    router.push('/');
+    
+    // Optional: Bersihkan seluruh storage jika diperlukan
+    // localStorage.clear();
+
+    // 2. Beri notifikasi singkat
+    alert('Anda telah keluar dari akun Admin.');
+
+    // 3. Force redirect ke halaman auth/login
+    router.replace('/'); 
   };
 
   const namaPenjual = userData?.nama || userData?.username || 'Admin Kantin';
@@ -96,7 +105,6 @@ export default function DashboardAdmin() {
             .toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
             .replace('.', ':');
 
-          // FIX LOGIKA STATUS PESANAN (Mencakup variasi format Strapi)
           let normStatus: StatusPesanan = 'Menunggu Konfirmasi';
           const rawStatus = (
             attr.menu_status || 
@@ -154,7 +162,6 @@ export default function DashboardAdmin() {
       }
     } catch (err) {
       console.error('Fetch orders error:', err);
-      // Jika fetch ke backend gagal total, baru gunakan fallback tanpa menduplikasi data
       setAllOrders([]);
     } finally {
       if (!isBackgroundFetch) setLoading(false);
@@ -269,12 +276,14 @@ export default function DashboardAdmin() {
           </nav>
         </div>
 
+        {/* TOMBOL LOGOUT UTAMA (DILENGKAPI type="button" & cursor-pointer) */}
         <button
+          type="button"
           onClick={handleLogout}
-          className="flex items-center gap-3 font-bold text-gray-800 hover:text-red-500 px-2 py-3 mt-6 transition-colors"
+          className="flex items-center gap-3 font-bold text-gray-800 hover:text-red-600 px-2 py-3 mt-6 transition-colors cursor-pointer w-full text-left"
         >
-          <LogOut className="w-6 h-6" />
-          <span className="text-lg">Keluar</span>
+          <LogOut className="w-6 h-6 text-red-500" />
+          <span className="text-lg text-red-600">Keluar</span>
         </button>
       </aside>
 
