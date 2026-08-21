@@ -11,7 +11,7 @@ export interface Tenant {
   documentId: string;
   name: string;
   rating?: number;
-  banner?: { url: string }; // 🟢 FIX: nama field diperbaiki dari 'benner' -> 'banner'
+  banner?: { url: string };
 }
 
 export interface Menu {
@@ -37,6 +37,7 @@ export interface Order {
   rating?: number;
   tenant?: Tenant;
   items?: OrderItem[];
+  user?: { documentId: string }; // 🟢 dipakai untuk filter kepemilikan di frontend
   createdAt: string;
   updatedAt: string;
 }
@@ -49,15 +50,12 @@ const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337'
 
 async function fetchOrderHistory(userDocId: string): Promise<Order[]> {
   const queryParts: string[] = [
-    // 🟢 FIX: field 'banner' (bukan 'benner'), dan hapus index [0] yang tidak perlu
     `populate[tenant][populate]=banner`,
     `populate[items][populate][menu][populate]=image`,
-    `populate[user][fields][0]=username`,
-    `populate[user][fields][1]=email`,
+    `populate[user][fields][0]=documentId`, // 🟢 hanya ambil documentId, bukan filter relasi
     `filters[menu_status][$eq]=Selesai`,
     `sort[0]=createdAt:desc`,
-    // 🟢 FIX: filter user WAJIB dikirim, tidak lagi kondisional
-    `filters[user][documentId][$eq]=${userDocId}`,
+    // 🟢 TIDAK ADA filters[user][...] di sini — Strapi memblokirnya ("Invalid key user")
   ];
 
   const queryString = queryParts.join('&');
@@ -79,7 +77,11 @@ async function fetchOrderHistory(userDocId: string): Promise<Order[]> {
   }
 
   const json = await res.json();
-  return json.data || [];
+  const allOrders: Order[] = json.data || [];
+
+  // 🟢 FIX: filter kepunyaan user di sisi frontend, karena Strapi
+  // menolak filter langsung ke relasi user lewat query string
+  return allOrders.filter((order) => order.user?.documentId === userDocId);
 }
 
 async function submitOrderRating(orderDocumentId: string, rating: number): Promise<void> {
@@ -109,19 +111,15 @@ export default function RiwayatPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 🟢 FIX: userDocId diambil dari localStorage, bukan hardcode ""
   const [userDocId, setUserDocId] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
 
-  // 🟢 Ambil data user yang login dari localStorage (diisi saat proses login)
+  // Ambil data user yang login dari localStorage (diisi saat proses login)
   useEffect(() => {
     const userStr = localStorage.getItem('user');
     if (userStr) {
       try {
         const user = JSON.parse(userStr);
-        // ⚠️ Cek dulu: pastikan field ini memang bernama 'documentId' di response Strapi kamu.
-        // Kalau ternyata cuma ada 'id', ganti baris ini jadi: setUserDocId(String(user.id));
-        // dan sesuaikan juga filter di fetchOrderHistory jadi filters[user][id][$eq]=...
         setUserDocId(user.documentId ?? null);
       } catch {
         setUserDocId(null);
@@ -143,14 +141,12 @@ export default function RiwayatPage() {
     }
   };
 
-  // 🟢 FIX: baru fetch SETELAH tahu status login (authChecked) dan userDocId ada isinya
   useEffect(() => {
     if (!authChecked) return;
 
     if (userDocId) {
       loadOrders(userDocId);
     } else {
-      // Belum login / data user tidak valid -> jangan tampilkan pesanan siapapun
       setOrders([]);
       setLoading(false);
     }
