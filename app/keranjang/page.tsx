@@ -51,8 +51,6 @@ export default function KeranjangPage() {
       localStorage.getItem('user') || localStorage.getItem('smart_canteen_user') || '{}'
     );
     const namaPelanggan = userLocal.username || userLocal.nama || 'Siswa Pelanggan';
-    const userDocId = userLocal.documentId; // 🟢 FIX: documentId user yang sedang login
-    const token = localStorage.getItem('token'); // 🟢 FIX: token JWT
 
     const totalHarga = selectedItems.reduce(
       (sum: number, item: any) => sum + Number(item.price || 0) * Number(item.quantity || 1),
@@ -92,7 +90,6 @@ export default function KeranjangPage() {
         pickup_time: pickupTime,
         pickup_date: pickupDate,
         items: strapiItemsComponent,
-        ...(userDocId ? { user: userDocId } : {}), // 🟢 FIX: sertakan relasi user
       },
     };
 
@@ -115,7 +112,6 @@ export default function KeranjangPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}), // 🟢 FIX: kirim token
         },
         body: JSON.stringify(strapiPayload),
       });
@@ -125,6 +121,7 @@ export default function KeranjangPage() {
       if (response.ok) {
         console.log('✅ Pesanan berhasil tersimpan di Strapi:', resJson);
 
+        // 💡 SIMPAN ORDER ID AKTIF AGAR USER TIDAK MELIHAT PESANAN ORANG LAIN
         localStorage.setItem('active_order_id', generatedOrderId);
 
         const dataLama = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
