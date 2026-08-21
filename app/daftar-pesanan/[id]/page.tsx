@@ -83,7 +83,7 @@ export default function DetailPesananPage() {
   };
 
   // Parser Item Kuat & Fleksibel
-  const parseItems = (attrData: any, localOrderItems: any[] = []): OrderItem[] => {
+  const parseItems = (attrData: any, localOrderItems: any[] = [], masterMenus: any[] = []): OrderItem[] => {
     let rawItems = attrData?.items || attrData?.order_items || attrData?.details || attrData?.menu_items || [];
 
     if (typeof rawItems === 'string') {
@@ -115,11 +115,11 @@ export default function DetailPesananPage() {
       const menuObj = itemAttr.menu?.data?.attributes || itemAttr.menu?.data || itemAttr.menu || itemAttr.menu_item || {};
       const localMatch = localOrderItems[idx] || {};
 
-      const name =
+      let name =
         itemAttr.name || itemAttr.nama || itemAttr.nama_menu || itemAttr.menu_name || itemAttr.title ||
-        menuObj.name || menuObj.nama || menuObj.title ||
-        localMatch.name || localMatch.nama ||
-        'Menu Kantin';
+        (typeof menuObj === 'object' && menuObj !== null ? (menuObj.name || menuObj.nama || menuObj.title) : undefined) ||
+        localMatch.name || localMatch.nama || localMatch.nama_menu || localMatch.title ||
+        '';
 
       const quantity = Number(
         itemAttr.quantity || itemAttr.qty || itemAttr.jumlah ||
@@ -128,9 +128,20 @@ export default function DetailPesananPage() {
 
       let price = Number(
         itemAttr.price || itemAttr.harga || itemAttr.harga_satuan || itemAttr.unit_price ||
-        menuObj.price || menuObj.harga ||
+        (typeof menuObj === 'object' && menuObj !== null ? (menuObj.price || menuObj.harga) : undefined) ||
         localMatch.price || localMatch.harga || 0
       );
+
+      const itemId = itemAttr.menu_id ?? itemAttr.menuId ?? menuObj.id ?? menuObj.documentId ?? (typeof itemAttr.menu === 'string' || typeof itemAttr.menu === 'number' ? itemAttr.menu : undefined) ?? localMatch.id;
+
+      if (masterMenus.length > 0 && itemId && (!name || price === 0)) {
+        const matched = masterMenus.find((m: any) => String(m.id) === String(itemId) || String(m.documentId) === String(itemId));
+        if (matched) {
+          const mAttr = matched.attributes || matched;
+          if (!name) name = mAttr.name || mAttr.nama || mAttr.title || '';
+          if (price === 0) price = Number(mAttr.price || mAttr.harga || 0);
+        }
+      }
 
       if (price === 0) {
         const itemSubtotal = Number(itemAttr.subtotal || itemAttr.total_harga || itemAttr.totalPrice || 0);
@@ -143,7 +154,7 @@ export default function DetailPesananPage() {
 
       return {
         id: itemAttr.id || idx,
-        name,
+        name: name || localMatch.name || localMatch.nama || 'Menu Kantin',
         price,
         quantity,
         notes: itemAttr.notes || itemAttr.catatan || itemAttr.note || localMatch.notes || localMatch.catatan || '',
@@ -158,6 +169,15 @@ export default function DetailPesananPage() {
     if (!isSilent) setLoading(true);
     let activeData: any = null;
     const cleanNoHash = rawParam.replace('#', '').trim();
+
+    let masterMenus: any[] = [];
+    try {
+      const resMenus = await fetch(`${STRAPI_URL}/api/menus?pagination[pageSize]=1000&status=draft`, { cache: 'no-store' });
+      if (resMenus.ok) {
+        const jsonMenus = await resMenus.json();
+        masterMenus = jsonMenus.data || [];
+      }
+    } catch (e) {}
 
     let savedLocalStatus: StatusType | null = null;
     let savedTimestamps: StatusTimestamps | null = null;
@@ -181,16 +201,10 @@ export default function DetailPesananPage() {
     }
 
     try {
-      let resFilter = await fetch(
-        `${STRAPI_URL}/api/orders?populate[items][populate]=*&populate[users_permissions_user]=*&filters[$or][0][documentId][$eq]=${rawParam}&filters[$or][1][order_id][$contains]=${cleanNoHash}`,
+      const resFilter = await fetch(
+        `${STRAPI_URL}/api/orders?populate=*&filters[$or][0][documentId][$eq]=${rawParam}&filters[$or][1][order_id][$contains]=${cleanNoHash}`,
         { cache: 'no-store' }
       );
-      if (!resFilter.ok) {
-        resFilter = await fetch(
-          `${STRAPI_URL}/api/orders?populate=*&filters[$or][0][documentId][$eq]=${rawParam}&filters[$or][1][order_id][$contains]=${cleanNoHash}`,
-          { cache: 'no-store' }
-        );
-      }
       if (resFilter.ok) {
         const jsonRes = await resFilter.json();
         const dataList = jsonRes.data || [];
@@ -203,10 +217,7 @@ export default function DetailPesananPage() {
 
     if (!activeData) {
       try {
-        let resAll = await fetch(`${STRAPI_URL}/api/orders?populate[items][populate]=*&populate[users_permissions_user]=*&pagination[pageSize]=100`, { cache: 'no-store' });
-        if (!resAll.ok) {
-          resAll = await fetch(`${STRAPI_URL}/api/orders?populate=*&pagination[pageSize]=100`, { cache: 'no-store' });
-        }
+        const resAll = await fetch(`${STRAPI_URL}/api/orders?populate=*&pagination[pageSize]=100`, { cache: 'no-store' });
         if (resAll.ok) {
           const jsonOrders = await resAll.json();
           const dataList = jsonOrders.data || [];

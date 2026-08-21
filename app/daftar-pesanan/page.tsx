@@ -26,17 +26,10 @@ export default function DaftarPesananPage() {
   const fetchOrders = useCallback(async () => {
     try {
       // API query standar yang pasti didukung Strapi v5
-      let res = await fetch(
-        `${STRAPI_URL}/api/orders?populate[items][populate]=*&populate[users_permissions_user]=*&sort[0]=createdAt:desc`,
+      const res = await fetch(
+        `${STRAPI_URL}/api/orders?populate=*&sort[0]=createdAt:desc`,
         { cache: 'no-store' }
       );
-
-      if (!res.ok) {
-        res = await fetch(
-          `${STRAPI_URL}/api/orders?populate=*&sort[0]=createdAt:desc`,
-          { cache: 'no-store' }
-        );
-      }
 
       if (res.ok) {
         const json = await res.json();

@@ -65,9 +65,7 @@ export default function StatusPesananPage() {
         attr.nama_menu ||
         attr.menu_name ||
         attr.title ||
-        menuObj.name ||
-        menuObj.nama ||
-        menuObj.title ||
+        (typeof menuObj === 'object' && menuObj !== null ? (menuObj.name || menuObj.nama || menuObj.title) : undefined) ||
         '';
 
       // 2. Ekstrak Harga (mencari semua kemungkinan key)
@@ -76,8 +74,7 @@ export default function StatusPesananPage() {
         attr.harga ??
         attr.harga_satuan ??
         attr.unit_price ??
-        menuObj.price ??
-        menuObj.harga ??
+        (typeof menuObj === 'object' && menuObj !== null ? (menuObj.price ?? menuObj.harga) : undefined) ??
         0
       );
 
@@ -85,7 +82,7 @@ export default function StatusPesananPage() {
       const notes = attr.notes || attr.catatan || attr.note || '';
 
       // FIX BUG: Jangan gunakan attr.id (ID baris komponen database) sebagai menuId
-      const itemId = attr.menu_id ?? attr.menuId ?? menuObj.id ?? menuObj.documentId ?? (typeof attr.menu === 'string' || typeof attr.menu === 'number' ? attr.menu : undefined);
+      const itemId = attr.menu_id ?? attr.menuId ?? (typeof menuObj === 'object' && menuObj !== null ? (menuObj.id ?? menuObj.documentId) : undefined) ?? (typeof attr.menu === 'string' || typeof attr.menu === 'number' ? attr.menu : undefined);
 
       // 3. Jika nama/harga masih 0, cari di master menu Strapi berdasarkan ID
       if (masterMenus.length > 0 && itemId && (!name || price === 0)) {
@@ -127,7 +124,7 @@ export default function StatusPesananPage() {
 
     let masterMenus: any[] = [];
     try {
-      const resMenus = await fetch(`${STRAPI_URL}/api/menus?pagination[pageSize]=1000`, { cache: 'no-store' });
+      const resMenus = await fetch(`${STRAPI_URL}/api/menus?pagination[pageSize]=1000&status=draft`, { cache: 'no-store' });
       if (resMenus.ok) {
         const jsonMenus = await resMenus.json();
         masterMenus = jsonMenus.data || [];
@@ -159,13 +156,8 @@ export default function StatusPesananPage() {
 
     // B. FETCH DATA DARI STRAPI
     try {
-      let fetchUrl = `${STRAPI_URL}/api/orders?filters[$or][0][order_id][$contains]=${searchId}&filters[$or][1][documentId][$eq]=${cleanOrderId}&populate[items][populate]=*&populate[users_permissions_user]=*`;
-      let res = await fetch(fetchUrl, { cache: 'no-store' });
-
-      if (!res.ok) {
-        fetchUrl = `${STRAPI_URL}/api/orders?filters[$or][0][order_id][$contains]=${searchId}&filters[$or][1][documentId][$eq]=${cleanOrderId}&populate=*`;
-        res = await fetch(fetchUrl, { cache: 'no-store' });
-      }
+      const fetchUrl = `${STRAPI_URL}/api/orders?filters[$or][0][order_id][$contains]=${searchId}&filters[$or][1][documentId][$eq]=${cleanOrderId}&populate=*`;
+      const res = await fetch(fetchUrl, { cache: 'no-store' });
 
       if (res.ok) {
         const json = await res.json();
