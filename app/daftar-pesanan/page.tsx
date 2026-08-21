@@ -27,7 +27,7 @@ export default function DaftarPesananPage() {
     try {
       // API query standar yang pasti didukung Strapi v5
       const res = await fetch(
-        `${STRAPI_URL}/api/orders?populate=*&populate[items][populate][menu]=*&sort[0]=createdAt:desc`,
+        `${STRAPI_URL}/api/orders?populate=*&sort[0]=createdAt:desc`,
         { cache: 'no-store' }
       );
 
