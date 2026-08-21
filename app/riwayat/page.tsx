@@ -11,7 +11,7 @@ export interface Tenant {
   documentId: string;
   name: string;
   rating?: number;
-  banner?: { url: string };
+  benner?: { url: string }; // nama field asli di Strapi memang 'benner'
 }
 
 export interface Menu {
@@ -37,7 +37,7 @@ export interface Order {
   rating?: number;
   tenant?: Tenant;
   items?: OrderItem[];
-  user?: { documentId: string }; // 🟢 dipakai untuk filter kepemilikan di frontend
+  user?: { documentId: string };
   createdAt: string;
   updatedAt: string;
 }
@@ -50,12 +50,12 @@ const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337'
 
 async function fetchOrderHistory(userDocId: string): Promise<Order[]> {
   const queryParts: string[] = [
-    `populate[tenant][populate]=banner`,
+    `populate[tenant][populate]=benner`,
     `populate[items][populate][menu][populate]=image`,
-    `populate[user][fields][0]=documentId`, // 🟢 hanya ambil documentId, bukan filter relasi
+    `populate[user][fields][0]=documentId`,
     `filters[menu_status][$eq]=Selesai`,
     `sort[0]=createdAt:desc`,
-    // 🟢 TIDAK ADA filters[user][...] di sini — Strapi memblokirnya ("Invalid key user")
+    // Tidak ada filters[user][...] di sini — Strapi menolaknya ("Invalid key user")
   ];
 
   const queryString = queryParts.join('&');
@@ -79,8 +79,7 @@ async function fetchOrderHistory(userDocId: string): Promise<Order[]> {
   const json = await res.json();
   const allOrders: Order[] = json.data || [];
 
-  // 🟢 FIX: filter kepunyaan user di sisi frontend, karena Strapi
-  // menolak filter langsung ke relasi user lewat query string
+  // Filter kepunyaan user di sisi frontend
   return allOrders.filter((order) => order.user?.documentId === userDocId);
 }
 
@@ -114,7 +113,6 @@ export default function RiwayatPage() {
   const [userDocId, setUserDocId] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
 
-  // Ambil data user yang login dari localStorage (diisi saat proses login)
   useEffect(() => {
     const userStr = localStorage.getItem('user');
     if (userStr) {
@@ -255,7 +253,7 @@ export default function RiwayatPage() {
 
               const tenantName = order.tenant?.name || 'Toko';
 
-              const rawImageUrl = order.tenant?.banner?.url || firstMenu?.image?.url;
+              const rawImageUrl = order.tenant?.benner?.url || firstMenu?.image?.url;
 
               const imageUrl = rawImageUrl
                 ? (rawImageUrl.startsWith('http') ? rawImageUrl : `${STRAPI_URL}${rawImageUrl}`)
