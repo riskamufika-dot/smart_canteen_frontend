@@ -11,8 +11,7 @@ export interface Tenant {
   documentId: string;
   name: string;
   rating?: number;
-  benner?: { url: string };
-  banner?: { url: string };
+  banner?: { url: string }; // 🟢 FIX: nama field diperbaiki dari 'benner' -> 'banner'
 }
 
 export interface Menu {
@@ -26,7 +25,7 @@ export interface OrderItem {
   documentId: string;
   quantity: number;
   price: number;
-  menu?: Menu | { data?: Menu }; // Flexible untuk response Strapi
+  menu?: Menu;
 }
 
 export interface Order {
@@ -36,7 +35,7 @@ export interface Order {
   menu_status?: string;
   total_price?: number;
   rating?: number;
-  tenant?: Tenant | { data?: Tenant };
+  tenant?: Tenant;
   items?: OrderItem[];
   createdAt: string;
   updatedAt: string;
@@ -48,33 +47,30 @@ export interface Order {
 
 const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337';
 
-async function fetchOrderHistory(userDocId?: string): Promise<Order[]> {
+async function fetchOrderHistory(userDocId: string): Promise<Order[]> {
   const queryParts: string[] = [
-    // 🟢 Deep Populate untuk Tenant & Menu beserta Gambar & Detailnya
-    `populate[tenant][populate]=*`,
-    `populate[items][populate][menu][populate]=*`,
-
-    // Populate User
+    // 🟢 FIX: field 'banner' (bukan 'benner'), dan hapus index [0] yang tidak perlu
+    `populate[tenant][populate]=banner`,
+    `populate[items][populate][menu][populate]=image`,
     `populate[user][fields][0]=username`,
     `populate[user][fields][1]=email`,
-
-    // Filter HANYA pesanan berstatus "Selesai"
     `filters[menu_status][$eq]=Selesai`,
-
-    // Urutkan transaksi terbaru ke terlama
     `sort[0]=createdAt:desc`,
+    // 🟢 FIX: filter user WAJIB dikirim, tidak lagi kondisional
+    `filters[user][documentId][$eq]=${userDocId}`,
   ];
-
-  if (userDocId) {
-    queryParts.push(`filters[user][documentId][$eq]=${userDocId}`);
-  }
 
   const queryString = queryParts.join('&');
   const url = `${STRAPI_URL}/api/orders?${queryString}`;
 
+  const token = localStorage.getItem('token');
+
   const res = await fetch(url, {
     cache: 'no-store',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
   });
 
   if (!res.ok) {
@@ -87,9 +83,14 @@ async function fetchOrderHistory(userDocId?: string): Promise<Order[]> {
 }
 
 async function submitOrderRating(orderDocumentId: string, rating: number): Promise<void> {
+  const token = localStorage.getItem('token');
+
   const res = await fetch(`${STRAPI_URL}/api/orders/${orderDocumentId}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify({
       data: { rating },
     }),
@@ -108,13 +109,32 @@ export default function RiwayatPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const CURRENT_USER_DOC_ID = ""; 
+  // 🟢 FIX: userDocId diambil dari localStorage, bukan hardcode ""
+  const [userDocId, setUserDocId] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
 
-  const loadOrders = async () => {
+  // 🟢 Ambil data user yang login dari localStorage (diisi saat proses login)
+  useEffect(() => {
+    const userStr = localStorage.getItem('user');
+    if (userStr) {
+      try {
+        const user = JSON.parse(userStr);
+        // ⚠️ Cek dulu: pastikan field ini memang bernama 'documentId' di response Strapi kamu.
+        // Kalau ternyata cuma ada 'id', ganti baris ini jadi: setUserDocId(String(user.id));
+        // dan sesuaikan juga filter di fetchOrderHistory jadi filters[user][id][$eq]=...
+        setUserDocId(user.documentId ?? null);
+      } catch {
+        setUserDocId(null);
+      }
+    }
+    setAuthChecked(true);
+  }, []);
+
+  const loadOrders = async (docId: string) => {
     try {
       setLoading(true);
       setError(null);
-      const data = await fetchOrderHistory(CURRENT_USER_DOC_ID || undefined);
+      const data = await fetchOrderHistory(docId);
       setOrders(data);
     } catch (err: any) {
       setError(err.message || 'Terjadi kesalahan saat memuat data');
@@ -123,11 +143,19 @@ export default function RiwayatPage() {
     }
   };
 
+  // 🟢 FIX: baru fetch SETELAH tahu status login (authChecked) dan userDocId ada isinya
   useEffect(() => {
-    loadOrders();
-  }, []);
+    if (!authChecked) return;
 
-  // 🟢 Beli Lagi mengarahkan ke halaman Detail Menu jika ID ditemukan
+    if (userDocId) {
+      loadOrders(userDocId);
+    } else {
+      // Belum login / data user tidak valid -> jangan tampilkan pesanan siapapun
+      setOrders([]);
+      setLoading(false);
+    }
+  }, [authChecked, userDocId]);
+
   const handleBuyAgain = (menuDocId?: string) => {
     if (menuDocId) {
       router.push(`/menu/${menuDocId}`);
@@ -152,11 +180,11 @@ export default function RiwayatPage() {
   return (
     <div className="w-full min-h-screen bg-white p-4 md:p-8">
       <div className="w-full max-w-full mx-auto">
-        
+
         {/* Header Navigation */}
         <div className="mb-6 flex items-center justify-between">
-          <button 
-            onClick={() => router.back()} 
+          <button
+            onClick={() => router.back()}
             className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-50 border border-gray-100 shadow-sm hover:bg-gray-100 transition"
           >
             <svg className="h-5 w-5 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -165,8 +193,8 @@ export default function RiwayatPage() {
           </button>
           <h1 className="text-xl font-bold text-gray-900">Riwayat</h1>
           <div className="flex items-center space-x-2">
-            <button 
-              onClick={loadOrders} 
+            <button
+              onClick={() => userDocId && loadOrders(userDocId)}
               className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-50 border border-gray-100 shadow-sm hover:bg-gray-100 transition text-gray-700"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -176,8 +204,21 @@ export default function RiwayatPage() {
           </div>
         </div>
 
+        {/* Belum login */}
+        {authChecked && !userDocId && (
+          <div className="w-full rounded-2xl bg-amber-50 border border-amber-100 p-8 text-center text-amber-700">
+            <p className="font-semibold mb-2">Kamu belum login.</p>
+            <button
+              onClick={() => router.push('/login')}
+              className="mt-1 rounded-lg bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700"
+            >
+              Login Sekarang
+            </button>
+          </div>
+        )}
+
         {/* Loading State */}
-        {loading && (
+        {loading && userDocId && (
           <div className="space-y-4 w-full">
             {[1, 2, 3].map((i) => (
               <div key={i} className="h-36 w-full animate-pulse rounded-2xl bg-gray-100" />
@@ -190,7 +231,7 @@ export default function RiwayatPage() {
           <div className="w-full rounded-2xl bg-red-50 p-6 text-center text-red-600">
             <p className="font-semibold">{error}</p>
             <button
-              onClick={loadOrders}
+              onClick={() => userDocId && loadOrders(userDocId)}
               className="mt-3 rounded-lg bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700"
             >
               Coba Lagi
@@ -199,7 +240,7 @@ export default function RiwayatPage() {
         )}
 
         {/* Empty State */}
-        {!loading && !error && orders.length === 0 && (
+        {!loading && !error && userDocId && orders.length === 0 && (
           <div className="w-full rounded-2xl bg-gray-50 border border-gray-100 p-12 text-center text-gray-500">
             Belum ada riwayat pesanan yang selesai.
           </div>
@@ -212,47 +253,28 @@ export default function RiwayatPage() {
               const status = order.menu_status || order.status_pesanan || 'Selesai';
               const price = Number(order.total_price || 0);
 
-              // 🟢 Normalisasi data Tenant
-              const rawTenant: any = (order.tenant as any)?.data || order.tenant;
-              const tenantName = rawTenant?.name || 'Toko';
-              const tenantRating = rawTenant?.rating || '4.8';
+              const firstItem = order.items?.[0];
+              const firstMenu = firstItem?.menu;
+              const firstMenuItemDocId = firstMenu?.documentId;
 
-              // 🟢 Normalisasi data Item & Menu pertama
-              const firstItem: any = order.items?.[0];
-              const rawFirstMenu: any = (firstItem?.menu as any)?.data || firstItem?.menu;
+              const tenantName = order.tenant?.name || 'Toko';
 
-              // 🟢 Ambil Document ID Menu dengan berbagai macam opsi format Strapi
-              const firstMenuItemDocId = rawFirstMenu?.documentId || rawFirstMenu?.id;
-
-              // 🟢 Prioritas Gambar: Banner Tenant -> Foto Menu -> Placeholder Unsplash
-              const rawImageUrl = 
-                rawTenant?.benner?.url || 
-                rawTenant?.banner?.url || 
-                rawFirstMenu?.image?.url;
+              const rawImageUrl = order.tenant?.banner?.url || firstMenu?.image?.url;
 
               const imageUrl = rawImageUrl
                 ? (rawImageUrl.startsWith('http') ? rawImageUrl : `${STRAPI_URL}${rawImageUrl}`)
                 : 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=300&q=80';
 
-              // 🟢 Rincian ringkas nama menu yang dipesan
               const itemsSummary = order.items?.length
-                ? order.items
-                    .map((item: any) => {
-                      const menuObj = item.menu?.data || item.menu;
-                      return `${item.quantity || 1}x ${menuObj?.name || 'Menu'}`;
-                    })
-                    .join(' + ')
+                ? order.items.map((item) => `${item.quantity || 1} ${item.menu?.name || 'Menu'}`).join(' + ')
                 : 'Pesanan';
 
               return (
-                <div 
-                  key={order.documentId} 
+                <div
+                  key={order.documentId}
                   className="w-full rounded-2xl bg-white p-4 md:p-5 shadow-sm border border-gray-200 flex gap-4 items-start justify-between"
                 >
-                  {/* SISI KIRI: Foto Toko & Detail Pesanan */}
                   <div className="flex gap-4 items-start flex-1 min-w-0">
-                    
-                    {/* Foto Toko / Menu */}
                     <div className="relative h-24 w-24 md:h-28 md:w-28 shrink-0 overflow-hidden rounded-xl bg-gray-100 border border-gray-100">
                       <img
                         src={imageUrl}
@@ -264,17 +286,16 @@ export default function RiwayatPage() {
                       />
                       <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex items-center gap-0.5 rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-bold text-gray-800 shadow-sm backdrop-blur-sm">
                         <span className="text-amber-400">★</span>
-                        <span>{tenantRating}</span>
+                        <span>{order.tenant?.rating || '4.8'}</span>
                       </div>
                     </div>
 
-                    {/* Rincian Teks */}
                     <div className="flex flex-col justify-between min-w-0 flex-1 py-0.5">
                       <div>
                         <h2 className="text-base md:text-lg font-bold text-gray-900 truncate leading-snug">
                           {tenantName}
                         </h2>
-                        
+
                         <div className="flex items-center gap-1.5 mt-0.5">
                           <p className="text-[11px] md:text-xs text-gray-400 font-medium">
                             {new Date(order.createdAt).toLocaleDateString('id-ID', {
@@ -294,7 +315,6 @@ export default function RiwayatPage() {
                         </div>
                       </div>
 
-                      {/* Detail Menu & Harga */}
                       <div className="mt-1.5">
                         <p className="text-xs md:text-sm text-gray-600 font-medium truncate">
                           {itemsSummary}
@@ -304,7 +324,6 @@ export default function RiwayatPage() {
                         </p>
                       </div>
 
-                      {/* Penilaian Bintang Interaktif */}
                       <div className="mt-2">
                         <p className="text-[10px] md:text-xs font-semibold text-gray-500 mb-0.5">Beri Penilaian Mu</p>
                         <div className="flex space-x-1">
@@ -326,19 +345,14 @@ export default function RiwayatPage() {
                     </div>
                   </div>
 
-                  {/* SISI KANAN: Tombol Beli Lagi */}
                   <div className="shrink-0 flex flex-col justify-start items-end">
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleBuyAgain(firstMenuItemDocId);
-                      }}
+                      onClick={() => handleBuyAgain(firstMenuItemDocId)}
                       className="rounded-full bg-emerald-50 px-4 md:px-5 py-1.5 text-xs md:text-sm font-semibold text-emerald-600 hover:bg-emerald-100 transition border border-emerald-200"
                     >
                       Beli Lagi
                     </button>
                   </div>
-
                 </div>
               );
             })}
