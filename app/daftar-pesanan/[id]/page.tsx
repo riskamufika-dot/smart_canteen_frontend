@@ -132,10 +132,19 @@ export default function DetailPesananPage() {
         localMatch.price || localMatch.harga || 0
       );
 
-      const itemId = itemAttr.menu_id ?? itemAttr.menuId ?? menuObj.id ?? menuObj.documentId ?? (typeof itemAttr.menu === 'string' || typeof itemAttr.menu === 'number' ? itemAttr.menu : undefined) ?? localMatch.id;
+      const rawMenuRef = itemAttr.menu?.data || itemAttr.menu;
+      const menuIdFromRef = (typeof rawMenuRef === 'object' && rawMenuRef !== null) ? (rawMenuRef.id || rawMenuRef.documentId) : (typeof rawMenuRef === 'number' || typeof rawMenuRef === 'string' ? rawMenuRef : undefined);
 
-      if (masterMenus.length > 0 && itemId && (!name || price === 0)) {
-        const matched = masterMenus.find((m: any) => String(m.id) === String(itemId) || String(m.documentId) === String(itemId));
+      const itemId = itemAttr.menu_id ?? itemAttr.menuId ?? menuIdFromRef ?? localMatch.id ?? localMatch.menu_id ?? localMatch.menuId;
+
+      if (masterMenus.length > 0 && (!name || price === 0)) {
+        let matched = itemId ? masterMenus.find((m: any) => String(m.id) === String(itemId) || String(m.documentId) === String(itemId)) : null;
+        if (!matched && price > 0) {
+          matched = masterMenus.find((m: any) => {
+            const mPrice = Number(m.price || m.harga || m.attributes?.price || m.attributes?.harga || 0);
+            return mPrice === price;
+          });
+        }
         if (matched) {
           const mAttr = matched.attributes || matched;
           if (!name) name = mAttr.name || mAttr.nama || mAttr.title || '';
@@ -172,11 +181,13 @@ export default function DetailPesananPage() {
 
     let masterMenus: any[] = [];
     try {
-      const resMenus = await fetch(`${STRAPI_URL}/api/menus?pagination[pageSize]=1000&status=draft`, { cache: 'no-store' });
-      if (resMenus.ok) {
-        const jsonMenus = await resMenus.json();
-        masterMenus = jsonMenus.data || [];
-      }
+      const [resPub, resDraft] = await Promise.all([
+        fetch(`${STRAPI_URL}/api/menus?pagination[pageSize]=1000`, { cache: 'no-store' }),
+        fetch(`${STRAPI_URL}/api/menus?pagination[pageSize]=1000&status=draft`, { cache: 'no-store' }).catch(() => null)
+      ]);
+      const jsonPub = resPub.ok ? await resPub.json() : { data: [] };
+      const jsonDraft = (resDraft && resDraft.ok) ? await resDraft.json() : { data: [] };
+      masterMenus = [...(jsonPub.data || []), ...(jsonDraft.data || [])];
     } catch (e) {}
 
     let savedLocalStatus: StatusType | null = null;
