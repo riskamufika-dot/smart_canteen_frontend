@@ -61,8 +61,11 @@ export default function KeranjangPage() {
 
     const localItems = selectedItems.map((item: any) => ({
       id: String(item.id),
+      name: String(item.name || item.nama || 'Makanan'),
       nama: String(item.name || item.nama || 'Makanan'),
+      price: Number(item.price || 0),
       harga: Number(item.price || 0),
+      quantity: Number(item.quantity || 1),
       qty: Number(item.quantity || 1),
       gambar: item.image || '',
       notes: item.notes || item.note || '',
