@@ -112,11 +112,12 @@ export default function DetailPesananPage() {
 
     return rawItems.map((it: any, idx: number) => {
       const itemAttr = it.attributes || it;
+      const menuObj = itemAttr.menu?.data?.attributes || itemAttr.menu?.data || itemAttr.menu || itemAttr.menu_item || {};
       const localMatch = localOrderItems[idx] || {};
 
       const name =
         itemAttr.name || itemAttr.nama || itemAttr.nama_menu || itemAttr.menu_name || itemAttr.title ||
-        itemAttr.menu?.data?.attributes?.name || itemAttr.menu?.name ||
+        menuObj.name || menuObj.nama || menuObj.title ||
         localMatch.name || localMatch.nama ||
         'Menu Kantin';
 
@@ -127,7 +128,7 @@ export default function DetailPesananPage() {
 
       let price = Number(
         itemAttr.price || itemAttr.harga || itemAttr.harga_satuan || itemAttr.unit_price ||
-        itemAttr.menu?.data?.attributes?.price || itemAttr.menu?.price ||
+        menuObj.price || menuObj.harga ||
         localMatch.price || localMatch.harga || 0
       );
 
@@ -180,10 +181,16 @@ export default function DetailPesananPage() {
     }
 
     try {
-      const resFilter = await fetch(
-        `${STRAPI_URL}/api/orders?populate=*&filters[$or][0][documentId][$eq]=${rawParam}&filters[$or][1][order_id][$contains]=${cleanNoHash}`,
+      let resFilter = await fetch(
+        `${STRAPI_URL}/api/orders?populate[items][populate]=*&populate[users_permissions_user]=*&filters[$or][0][documentId][$eq]=${rawParam}&filters[$or][1][order_id][$contains]=${cleanNoHash}`,
         { cache: 'no-store' }
       );
+      if (!resFilter.ok) {
+        resFilter = await fetch(
+          `${STRAPI_URL}/api/orders?populate=*&filters[$or][0][documentId][$eq]=${rawParam}&filters[$or][1][order_id][$contains]=${cleanNoHash}`,
+          { cache: 'no-store' }
+        );
+      }
       if (resFilter.ok) {
         const jsonRes = await resFilter.json();
         const dataList = jsonRes.data || [];
@@ -196,7 +203,10 @@ export default function DetailPesananPage() {
 
     if (!activeData) {
       try {
-        const resAll = await fetch(`${STRAPI_URL}/api/orders?populate=*&pagination[pageSize]=100`, { cache: 'no-store' });
+        let resAll = await fetch(`${STRAPI_URL}/api/orders?populate[items][populate]=*&populate[users_permissions_user]=*&pagination[pageSize]=100`, { cache: 'no-store' });
+        if (!resAll.ok) {
+          resAll = await fetch(`${STRAPI_URL}/api/orders?populate=*&pagination[pageSize]=100`, { cache: 'no-store' });
+        }
         if (resAll.ok) {
           const jsonOrders = await resAll.json();
           const dataList = jsonOrders.data || [];

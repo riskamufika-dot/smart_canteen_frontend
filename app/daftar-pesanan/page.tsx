@@ -26,10 +26,17 @@ export default function DaftarPesananPage() {
   const fetchOrders = useCallback(async () => {
     try {
       // API query standar yang pasti didukung Strapi v5
-      const res = await fetch(
-        `${STRAPI_URL}/api/orders?populate=*&sort[0]=createdAt:desc`,
+      let res = await fetch(
+        `${STRAPI_URL}/api/orders?populate[items][populate]=*&populate[users_permissions_user]=*&sort[0]=createdAt:desc`,
         { cache: 'no-store' }
       );
+
+      if (!res.ok) {
+        res = await fetch(
+          `${STRAPI_URL}/api/orders?populate=*&sort[0]=createdAt:desc`,
+          { cache: 'no-store' }
+        );
+      }
 
       if (res.ok) {
         const json = await res.json();
@@ -66,13 +73,52 @@ export default function DaftarPesananPage() {
           };
         });
 
-        setOrders(formattedOrders);
+        if (formattedOrders.length > 0) {
+          setOrders(formattedOrders);
+        }
       }
     } catch (e) {
       console.warn('Gagal koneksi ke Strapi:', e);
-    } finally {
-      setLoading(false);
     }
+
+    if (typeof window !== 'undefined') {
+      try {
+        const localOrders = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
+        if (localOrders.length > 0) {
+          const localFormatted: Order[] = localOrders.map((attr: any, idx: number) => {
+            const rawDate = attr.createdAt ? new Date(attr.createdAt) : new Date();
+            const orderTime = rawDate.toLocaleTimeString('id-ID', {
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+            }).replace('.', ':') + ' WIB';
+
+            const rawStatus = String(attr.menu_status || attr.status || 'pending').toLowerCase();
+            let displayStatus = 'Menunggu Konfirmasi';
+            if (rawStatus.includes('disiapkan') || rawStatus === 'sedang_disiapkan') displayStatus = 'Sedang Disiapkan';
+            else if (rawStatus.includes('siap') || rawStatus === 'siap_diambil') displayStatus = 'Siap Diambil';
+            else if (rawStatus.includes('selesai')) displayStatus = 'Selesai';
+
+            const fullOrderId = attr.order_id || attr.orderId || `#SC-${idx + 1}`;
+            const cleanOrderId = String(fullOrderId).replace('#', '').trim();
+
+            return {
+              id: attr.id || attr.documentId || cleanOrderId,
+              orderId: fullOrderId,
+              rawOrderId: cleanOrderId,
+              customerName: attr.customer_name || attr.customerName || 'Siswa Pelanggan',
+              customerClass: attr.kelas || attr.customer_class || '-',
+              orderTime: orderTime,
+              status: displayStatus,
+            };
+          });
+
+          setOrders(prev => prev.length > 0 ? prev : localFormatted);
+        }
+      } catch (e) {}
+    }
+
+    setLoading(false);
   }, []);
 
   useEffect(() => {

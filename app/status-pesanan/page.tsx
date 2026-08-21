@@ -84,11 +84,12 @@ export default function StatusPesananPage() {
       const quantity = Number(attr.quantity ?? attr.qty ?? attr.jumlah ?? 1) || 1;
       const notes = attr.notes || attr.catatan || attr.note || '';
 
-      const itemId = attr.menu_id ?? attr.menuId ?? attr.id ?? menuObj.id;
+      // FIX BUG: Jangan gunakan attr.id (ID baris komponen database) sebagai menuId
+      const itemId = attr.menu_id ?? attr.menuId ?? menuObj.id ?? menuObj.documentId ?? (typeof attr.menu === 'string' || typeof attr.menu === 'number' ? attr.menu : undefined);
 
       // 3. Jika nama/harga masih 0, cari di master menu Strapi berdasarkan ID
       if (masterMenus.length > 0 && itemId && (!name || price === 0)) {
-        const matched = masterMenus.find((m: any) => String(m.id || m.documentId) === String(itemId));
+        const matched = masterMenus.find((m: any) => String(m.id) === String(itemId) || String(m.documentId) === String(itemId));
         if (matched) {
           const mAttr = matched.attributes || matched;
           if (!name) name = mAttr.name || mAttr.nama || mAttr.title || '';
@@ -136,10 +137,11 @@ export default function StatusPesananPage() {
     // A. BACA DULU DARI LOCALSTORAGE
     let localBackupItems: OrderItem[] = [];
     let localTotalPrice = 0;
+    let matchedLocal: any = null;
     if (typeof window !== 'undefined') {
       try {
         const localOrders = JSON.parse(localStorage.getItem('smart_canteen_orders') || '[]');
-        const matchedLocal = localOrders.find((o: any) => {
+        matchedLocal = localOrders.find((o: any) => {
           const docId = String(o.documentId || '');
           const idStr = String(o.id || '');
           const oId = String(o.orderId || o.order_id || '').replace('#', '').trim();
@@ -157,8 +159,13 @@ export default function StatusPesananPage() {
 
     // B. FETCH DATA DARI STRAPI
     try {
-      const fetchUrl = `${STRAPI_URL}/api/orders?filters[$or][0][order_id][$contains]=${searchId}&filters[$or][1][documentId][$eq]=${cleanOrderId}&populate=*`;
-      const res = await fetch(fetchUrl, { cache: 'no-store' });
+      let fetchUrl = `${STRAPI_URL}/api/orders?filters[$or][0][order_id][$contains]=${searchId}&filters[$or][1][documentId][$eq]=${cleanOrderId}&populate[items][populate]=*&populate[users_permissions_user]=*`;
+      let res = await fetch(fetchUrl, { cache: 'no-store' });
+
+      if (!res.ok) {
+        fetchUrl = `${STRAPI_URL}/api/orders?filters[$or][0][order_id][$contains]=${searchId}&filters[$or][1][documentId][$eq]=${cleanOrderId}&populate=*`;
+        res = await fetch(fetchUrl, { cache: 'no-store' });
+      }
 
       if (res.ok) {
         const json = await res.json();
@@ -208,6 +215,21 @@ export default function StatusPesananPage() {
       }
     } catch (e) {
       console.warn('Gagal fetch dari Strapi:', e);
+    }
+
+    if (!latestData && matchedLocal) {
+      latestData = {
+        id: matchedLocal.orderId || matchedLocal.order_id || 'SC-1',
+        orderId: matchedLocal.orderId || matchedLocal.order_id || '#SC-1',
+        createdAt: matchedLocal.createdAt || new Date().toISOString(),
+        updatedAt: matchedLocal.createdAt || new Date().toISOString(),
+        status: normalizeStatus(matchedLocal.status || matchedLocal.menu_status),
+        totalPrice: Number(matchedLocal.totalPrice || matchedLocal.total_price || localTotalPrice),
+        items: localBackupItems,
+        pickupDate: matchedLocal.pickupDate || matchedLocal.pickup_date || '-',
+        pickupTime: matchedLocal.pickupTime || matchedLocal.pickup_time || '-',
+        paymentMethod: String(matchedLocal.paymentMethod || matchedLocal.payment_method || 'CASH').toUpperCase(),
+      };
     }
 
     if (latestData) {
