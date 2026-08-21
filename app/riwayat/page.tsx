@@ -11,21 +11,22 @@ export interface Tenant {
   documentId: string;
   name: string;
   rating?: number;
-  benner?: { url: string }; // 🟢 Field gambar tenant di Strapi bernama 'banner'
+  benner?: { url: string };
+  banner?: { url: string };
 }
 
 export interface Menu {
   documentId: string;
   name: string;
   price: number;
-  image?: { url: string }; // 🟢 Field gambar menu bernama 'image'
+  image?: { url: string };
 }
 
 export interface OrderItem {
   documentId: string;
   quantity: number;
   price: number;
-  menu?: Menu;
+  menu?: Menu | { data?: Menu }; // Flexible untuk response Strapi
 }
 
 export interface Order {
@@ -35,7 +36,7 @@ export interface Order {
   menu_status?: string;
   total_price?: number;
   rating?: number;
-  tenant?: Tenant;
+  tenant?: Tenant | { data?: Tenant };
   items?: OrderItem[];
   createdAt: string;
   updatedAt: string;
@@ -49,16 +50,14 @@ const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL || 'http://localhost:1337'
 
 async function fetchOrderHistory(userDocId?: string): Promise<Order[]> {
   const queryParts: string[] = [
-    // 🟢 Populate field 'banner' di Tenant
-    `populate[tenant][populate][0]=benner`,
-    
-    // 🟢 Populate field 'image' di Menu
-    `populate[items][populate][menu][populate][0]=image`,
-    
-    // Populate user
+    // 🟢 Deep Populate untuk Tenant & Menu beserta Gambar & Detailnya
+    `populate[tenant][populate]=*`,
+    `populate[items][populate][menu][populate]=*`,
+
+    // Populate User
     `populate[user][fields][0]=username`,
     `populate[user][fields][1]=email`,
-    
+
     // Filter HANYA pesanan berstatus "Selesai"
     `filters[menu_status][$eq]=Selesai`,
 
@@ -213,25 +212,36 @@ export default function RiwayatPage() {
               const status = order.menu_status || order.status_pesanan || 'Selesai';
               const price = Number(order.total_price || 0);
 
-              // Ambil item & menu pertama
-              const firstItem = order.items?.[0];
-              const firstMenu = firstItem?.menu;
-              const firstMenuItemDocId = firstMenu?.documentId;
+              // 🟢 Normalisasi data Tenant
+              const rawTenant: any = (order.tenant as any)?.data || order.tenant;
+              const tenantName = rawTenant?.name || 'Toko';
+              const tenantRating = rawTenant?.rating || '4.8';
 
-              // Nama toko dari Strapi (jika kosong, fallback ke 'Toko')
-              const tenantName = order.tenant?.name || 'Toko';
+              // 🟢 Normalisasi data Item & Menu pertama
+              const firstItem: any = order.items?.[0];
+              const rawFirstMenu: any = (firstItem?.menu as any)?.data || firstItem?.menu;
 
-              // 🟢 Prioritas Gambar:
-              // 1. Gambar 'banner' milik Tenant
-              // 2. Gambar 'image' milik Menu makanan
-              const rawImageUrl = order.tenant?.benner?.url || firstMenu?.image?.url;
+              // 🟢 Ambil Document ID Menu dengan berbagai macam opsi format Strapi
+              const firstMenuItemDocId = rawFirstMenu?.documentId || rawFirstMenu?.id;
+
+              // 🟢 Prioritas Gambar: Banner Tenant -> Foto Menu -> Placeholder Unsplash
+              const rawImageUrl = 
+                rawTenant?.benner?.url || 
+                rawTenant?.banner?.url || 
+                rawFirstMenu?.image?.url;
 
               const imageUrl = rawImageUrl
                 ? (rawImageUrl.startsWith('http') ? rawImageUrl : `${STRAPI_URL}${rawImageUrl}`)
                 : 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=300&q=80';
 
+              // 🟢 Rincian ringkas nama menu yang dipesan
               const itemsSummary = order.items?.length
-                ? order.items.map((item) => `${item.quantity || 1} ${item.menu?.name || 'Menu'}`).join(' + ')
+                ? order.items
+                    .map((item: any) => {
+                      const menuObj = item.menu?.data || item.menu;
+                      return `${item.quantity || 1}x ${menuObj?.name || 'Menu'}`;
+                    })
+                    .join(' + ')
                 : 'Pesanan';
 
               return (
@@ -254,7 +264,7 @@ export default function RiwayatPage() {
                       />
                       <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex items-center gap-0.5 rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-bold text-gray-800 shadow-sm backdrop-blur-sm">
                         <span className="text-amber-400">★</span>
-                        <span>{order.tenant?.rating || '4.8'}</span>
+                        <span>{tenantRating}</span>
                       </div>
                     </div>
 
@@ -319,7 +329,10 @@ export default function RiwayatPage() {
                   {/* SISI KANAN: Tombol Beli Lagi */}
                   <div className="shrink-0 flex flex-col justify-start items-end">
                     <button
-                      onClick={() => handleBuyAgain(firstMenuItemDocId)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleBuyAgain(firstMenuItemDocId);
+                      }}
                       className="rounded-full bg-emerald-50 px-4 md:px-5 py-1.5 text-xs md:text-sm font-semibold text-emerald-600 hover:bg-emerald-100 transition border border-emerald-200"
                     >
                       Beli Lagi
